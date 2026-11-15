@@ -15,8 +15,11 @@ class ServerBaseNotifier extends Notifier<String> {
   static String _initial = _defaultBase();
 
   /// Web 端默认从页面地址推导 API（部署到任意主机开箱即用）；
-  /// 桌面/本机调试保持 127.0.0.1。
+  /// 桌面/移动端可用 --dart-define=CHORD_DEFAULT_BASE=... 指定默认服务器；
+  /// 本机调试保持 127.0.0.1。
   static String _defaultBase() {
+    const fromDefine = String.fromEnvironment('CHORD_DEFAULT_BASE');
+    if (fromDefine.isNotEmpty) return fromDefine;
     if (kIsWeb) {
       final u = Uri.base;
       if (u.host.isNotEmpty && u.host != 'localhost' && u.host != '127.0.0.1') {

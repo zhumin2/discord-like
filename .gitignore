@@ -4,8 +4,8 @@ server/.data/
 # ===== 构建产物 =====
 client/build/
 gui/build/
-app/
-console/
+/app/
+/console/
 server/*.exe
 logs/
 *.log

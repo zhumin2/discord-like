@@ -46,3 +46,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Android 本机 SDK 路径（flutter create 生成，机器特定）
+android/local.properties
