@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api_client.dart';
@@ -11,7 +12,19 @@ import '../storage.dart';
 class ServerBaseNotifier extends Notifier<String> {
   @override
   String build() => _initial;
-  static String _initial = 'http://127.0.0.1:8081';
+  static String _initial = _defaultBase();
+
+  /// Web 端默认从页面地址推导 API（部署到任意主机开箱即用）；
+  /// 桌面/本机调试保持 127.0.0.1。
+  static String _defaultBase() {
+    if (kIsWeb) {
+      final u = Uri.base;
+      if (u.host.isNotEmpty && u.host != 'localhost' && u.host != '127.0.0.1') {
+        return '${u.scheme}://${u.host}:8081';
+      }
+    }
+    return 'http://127.0.0.1:8081';
+  }
 
   static Future<void> restore() async {
     _initial = KeyValueStore.getString('serverBase') ?? _initial;
