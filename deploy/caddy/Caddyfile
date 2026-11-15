@@ -1,0 +1,37 @@
+# Chord TLS 反向代理配置（v1.1 A1）
+# 使用 Caddy（自动申请/续期 Let's Encrypt 证书，最省心）
+#
+# 服务器安装 Caddy 后，把本文件复制为 /etc/caddy/Caddyfile 并替换域名：
+#   curl -o /usr/bin/caddy "https://caddyserver.com/api/download?os=linux&arch=amd64"
+#   cp Caddyfile /etc/caddy/Caddyfile
+#   sed -i 's/chord.example.com/你的域名/' /etc/caddy/Caddyfile
+#   # systemd 服务由发行版包/文档提供，或手动注册：
+#   # caddy start
+#
+# 启用后需要同步修改：
+#   1. /opt/chord/server/.env 的 CLIENT_ORIGIN 增加 https://<域名>
+#      （保留旧的 http://129.226.159.168:3000，两种入口并存过渡）
+#   2. systemctl restart chord-server
+#   3. 客户端以 --dart-define=CHORD_DEFAULT_BASE=https://<域名> 重新构建分发
+#
+# 安全组/防火墙放行 80 与 443（80 用于证书验证与 HTTP 跳转）。
+
+chord.example.com {
+	# Web 静态（Flutter Web + PWA）
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# API + WebSocket（wss）+ 上传文件
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8081
+	}
+	handle /uploads/* {
+		reverse_proxy 127.0.0.1:8081
+	}
+	handle /ws {
+		reverse_proxy 127.0.0.1:8081
+	}
+
+	# WebSocket 升级头由 Caddy 自动透传，无需额外配置
+}

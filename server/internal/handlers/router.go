@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -24,16 +25,21 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 
 	r.GET("/api/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
 	r.GET("/ws", s.Hub.HandleWS)
+	// 上传文件读取（文件名为不可猜测 UUID，公开可读）
+	r.GET("/uploads/*filepath", s.serveUpload)
 
 	api := r.Group("/api")
 	{
-		api.POST("/auth/register", s.Register)
-		api.POST("/auth/login", s.Login)
+		// 匿名接口：按 IP 限流（防撞库/滥注）
+		api.POST("/auth/register", s.limitIP(10, time.Minute, "register"), s.Register)
+		api.POST("/auth/login", s.limitIP(10, time.Minute, "login"), s.Login)
 
 		authed := api.Group("", auth.Middleware(s.Cfg.JWTSecret))
 		{
 			authed.GET("/users/me", s.Me)
 			authed.GET("/users/search", s.SearchUsers)
+
+			authed.POST("/upload", s.limitUser(30, time.Minute, "upload"), s.Upload)
 
 			authed.GET("/guilds", s.ListGuilds)
 			authed.POST("/guilds", s.CreateGuild)
@@ -49,7 +55,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 
 			authed.DELETE("/channels/:id", s.DeleteChannel)
 			authed.GET("/channels/:id/messages", s.ListMessages)
-			authed.POST("/channels/:id/messages", s.SendMessage)
+			authed.POST("/channels/:id/messages", s.limitUser(20, 10*time.Second, "msg"), s.SendMessage)
 			authed.GET("/channels/:id/read", s.GetReadState)
 			authed.PUT("/channels/:id/read", s.PutReadState)
 

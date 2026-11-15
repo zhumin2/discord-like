@@ -10,12 +10,13 @@ import (
 )
 
 type Config struct {
-	Port       string
-	DBDSN      string
-	RedisAddr  string // 为空则使用进程内实现（单实例开发模式）
-	JWTSecret  string
-	SeedDemo   bool
+	Port          string
+	DBDSN         string
+	RedisAddr     string // 为空则使用进程内实现（单实例开发模式）
+	JWTSecret     string
+	SeedDemo      bool
 	ClientOrigins []string // 允许的 CORS 来源，空则允许全部（开发模式）
+	UploadDir     string   // 上传文件根目录（v1.1）
 }
 
 // Load 读取 .env（若存在）与环境变量。DSN/Secret 提供开发期默认值，
@@ -46,6 +47,7 @@ func Load() *Config {
 			"http://localhost:3000",
 			"http://127.0.0.1:3000",
 		},
+		UploadDir: getEnv("UPLOAD_DIR", "./data/uploads"),
 	}
 }
 

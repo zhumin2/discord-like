@@ -3,13 +3,24 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-/// 轻量 Markdown 风格富文本：**粗体** *斜体* `行内代码` ```代码块``` @提及 URL。
+/// 轻量 Markdown 风格富文本：**粗体** *斜体* `行内代码` ```代码块``` @提及 URL
+/// 以及 v1.1 的图片 `![alt](url)`（支持相对 URL，经 resolveUrl 解析后内联渲染）。
 class RichTextSpan extends StatelessWidget {
   final String text;
   final TextStyle? baseStyle;
   final void Function(String url)? onLinkTap;
 
-  const RichTextSpan(this.text, {super.key, this.baseStyle, this.onLinkTap});
+  /// 相对 URL → 完整 URL（如把 /uploads/... 拼上服务器地址）；null 则原样使用。
+  final String Function(String url)? resolveUrl;
+
+  const RichTextSpan(this.text,
+      {super.key, this.baseStyle, this.onLinkTap, this.resolveUrl});
+
+  String? _resolve(String url) {
+    if (url.startsWith('http')) return url;
+    final f = resolveUrl;
+    return f != null ? f(url) : null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,13 +30,16 @@ class RichTextSpan extends StatelessWidget {
     );
   }
 
+  // 图片语法：整体 URL 部分（含相对路径）
+  static final RegExp _image = RegExp(r'!\[[^\]]*\]\((https?://[^\s)]+|/uploads/[^\s)]+)\)');
+
   List<InlineSpan> _parse(BuildContext context) {
     final spans = <InlineSpan>[];
     // 先按代码块切分
     final blocks = RegExp(r'```([\s\S]*?)```').allMatches(text);
     var cursor = 0;
     for (final b in blocks) {
-      if (b.start > cursor) spans.addAll(_parseInline(text.substring(cursor, b.start)));
+      if (b.start > cursor) spans.addAll(_parseWithImages(text.substring(cursor, b.start), context));
       final code = b.group(1) ?? '';
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.baseline,
@@ -50,8 +64,68 @@ class RichTextSpan extends StatelessWidget {
       ));
       cursor = b.end;
     }
-    if (cursor < text.length) spans.addAll(_parseInline(text.substring(cursor)));
+    if (cursor < text.length) spans.addAll(_parseWithImages(text.substring(cursor), context));
     return spans;
+  }
+
+  /// 先把图片语法切出来渲染为图片组件，其余文本走普通行内解析。
+  List<InlineSpan> _parseWithImages(String s, BuildContext context) {
+    final spans = <InlineSpan>[];
+    var cursor = 0;
+    for (final m in _image.allMatches(s)) {
+      if (m.start > cursor) spans.addAll(_parseInline(s.substring(cursor, m.start)));
+      final url = _resolve(m.group(1)!);
+      if (url != null) spans.add(WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: _imageWidget(url, context),
+      ));
+      cursor = m.end;
+    }
+    if (cursor < s.length) spans.addAll(_parseInline(s.substring(cursor)));
+    return spans;
+  }
+
+  Widget _imageWidget(String url, BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: GestureDetector(
+        onTap: () => showDialog(
+          context: context,
+          barrierColor: Colors.black87,
+          builder: (_) => Dialog(
+            backgroundColor: Colors.transparent,
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: InteractiveViewer(
+                maxScale: 5,
+                child: Image.network(url, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320, maxHeight: 220),
+          child: Image.network(
+            url,
+            fit: BoxFit.contain,
+            loadingBuilder: (c, child, progress) =>
+                progress == null ? child : const SizedBox(
+                  width: 120, height: 60,
+                  child: Center(child: SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2)))),
+            errorBuilder: (_, __, ___) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.broken_image_outlined, size: 18, color: ChordColors.textMuted),
+                SizedBox(width: 6),
+                Text('图片加载失败', style: TextStyle(fontSize: 12, color: ChordColors.textMuted)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   List<InlineSpan> _parseInline(String s) {

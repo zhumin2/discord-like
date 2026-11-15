@@ -24,6 +24,30 @@ class ApiClient {
   Uri _uri(String path, [Map<String, String>? q]) =>
       Uri.parse('$base/api$path').replace(queryParameters: q);
 
+  /// 上传文件（v1.1），返回相对 URL（如 /uploads/202611/xxx.png）。
+  Future<String> upload(List<int> bytes, String filename) async {
+    final uri = Uri.parse('$base/api/upload');
+    final req = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $token'
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    http.Response resp;
+    try {
+      resp = await http.Response.fromStream(await _http.send(req))
+          .timeout(const Duration(seconds: 60));
+    } catch (e) {
+      throw ApiException(0, '上传失败：无法连接服务器');
+    }
+    final text = utf8.decode(resp.bodyBytes);
+    if (resp.statusCode >= 400) {
+      String msg = '上传失败 (${resp.statusCode})';
+      try {
+        msg = (jsonDecode(text) as Map<String, dynamic>)['error'] as String? ?? msg;
+      } catch (_) {}
+      throw ApiException(resp.statusCode, msg);
+    }
+    return (jsonDecode(text) as Map<String, dynamic>)['url'] as String;
+  }
+
   Future<dynamic> _call(String method, String path,
       {Map<String, String>? q, Object? body}) async {
     final headers = <String, String>{

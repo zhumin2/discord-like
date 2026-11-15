@@ -13,6 +13,7 @@ class MessageTile extends StatefulWidget {
   final void Function(String messageId, String emoji) onToggleReaction;
   final void Function(String messageId, String content) onEdit;
   final void Function(String messageId) onDelete;
+  final String Function(String url)? resolveUrl; // 相对 URL 解析（v1.1 图片）
 
   const MessageTile({
     super.key,
@@ -22,6 +23,7 @@ class MessageTile extends StatefulWidget {
     required this.onToggleReaction,
     required this.onEdit,
     required this.onDelete,
+    this.resolveUrl,
   });
 
   @override
@@ -91,6 +93,7 @@ class _MessageTileState extends State<MessageTile> {
               m.content,
               baseStyle: const TextStyle(
                   fontSize: 15, height: 1.35, color: ChordColors.textNormal),
+              resolveUrl: widget.resolveUrl,
             ),
           );
 

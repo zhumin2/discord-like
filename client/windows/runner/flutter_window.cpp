@@ -1,8 +1,80 @@
 ﻿#include "flutter_window.h"
 
+#include <commdlg.h>
+#include <flutter/encodable_value.h>
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
 #include <optional>
+#include <string>
 
 #include "flutter/generated_plugin_registrant.h"
+
+// v1.1: native file picker channel "chord/file" (no Flutter plugin needed,
+// see AGENTS.md pitfall 8). Returns {path, name} or null on cancel.
+static void RegisterFileChannel(flutter::FlutterEngine* engine) {
+  // Heap-allocated and intentionally never freed: the channel must outlive
+  // every method call for the lifetime of the process.
+  auto* channel = new flutter::MethodChannel<>(
+      engine->messenger(), "chord/file", &flutter::StandardMethodCodec::GetInstance());
+  channel->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() != "pickFile") {
+          result->NotImplemented();
+          return;
+        }
+        bool images_only = false;
+        if (const auto* args =
+                std::get_if<flutter::EncodableMap>(call.arguments())) {
+          auto it = args->find(flutter::EncodableValue("imagesOnly"));
+          if (it != args->end()) {
+            if (const auto* b = std::get_if<bool>(&it->second)) {
+              images_only = *b;
+            }
+          }
+        }
+
+        wchar_t file[MAX_PATH] = L"";
+        OPENFILENAMEW ofn{};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = GetActiveWindow();
+        ofn.lpstrFile = file;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrFilter = images_only
+            ? L"Images\0*.jpg;*.jpeg;*.png;*.gif;*.webp;*.svg\0All files\0*.*\0"
+            : L"All files\0*.*\0";
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+        if (!GetOpenFileNameW(&ofn)) {
+          result->Success(nullptr);  // user cancelled
+          return;
+        }
+
+        auto to_utf8 = [](const std::wstring& wide) -> std::string {
+          if (wide.empty()) return std::string();
+          int size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
+                                         static_cast<int>(wide.size()),
+                                         nullptr, 0, nullptr, nullptr);
+          std::string utf8(size, 0);
+          WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
+                              static_cast<int>(wide.size()), utf8.data(),
+                              size, nullptr, nullptr);
+          return utf8;
+        };
+
+        const std::wstring wpath(file);
+        size_t pos = wpath.find_last_of(L"\\/");
+        const std::wstring wname =
+            (pos == std::wstring::npos) ? wpath : wpath.substr(pos + 1);
+
+        flutter::EncodableMap resp;
+        resp[flutter::EncodableValue("path")] =
+            flutter::EncodableValue(to_utf8(wpath));
+        resp[flutter::EncodableValue("name")] =
+            flutter::EncodableValue(to_utf8(wname));
+        result->Success(flutter::EncodableValue(resp));
+      });
+}
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +97,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  RegisterFileChannel(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

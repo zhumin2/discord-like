@@ -3,12 +3,14 @@ import 'package:flutter/services.dart';
 
 import '../theme.dart';
 
-/// 消息输入框：回车发送（Shift+回车换行），输入时触发 typing。
+/// 消息输入框：回车发送（Shift+回车换行），输入时触发 typing；
+/// v1.1 支持附件：onAttach 由外层完成选文件+上传并返回要插入的文本（null=取消）。
 class Composer extends StatefulWidget {
   final String channelName;
   final bool isDM;
   final Future<void> Function(String text) onSend;
   final VoidCallback onTyping;
+  final Future<String?> Function()? onAttach;
 
   const Composer({
     super.key,
@@ -16,6 +18,7 @@ class Composer extends StatefulWidget {
     required this.isDM,
     required this.onSend,
     required this.onTyping,
+    this.onAttach,
   });
 
   @override
@@ -46,6 +49,30 @@ class _ComposerState extends State<Composer> {
     }
   }
 
+  Future<void> _attach() async {
+    final onAttach = widget.onAttach;
+    if (onAttach == null || _sending) return;
+    setState(() => _sending = true);
+    String? insert;
+    String? err;
+    try {
+      insert = await onAttach();
+    } catch (e) {
+      err = e.toString();
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+    if (insert != null && insert.isNotEmpty) {
+      _ctl.text += insert;
+      _ctl.selection = TextSelection.fromPosition(
+          TextPosition(offset: _ctl.text.length));
+    }
+    if (err != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err, style: const TextStyle(fontSize: 13))));
+    }
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     // 桌面/Web：无 Shift 修饰的 Enter 发送，Shift+Enter 换行
     if (event is KeyDownEvent &&
@@ -72,6 +99,20 @@ class _ComposerState extends State<Composer> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            if (widget.onAttach != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 2),
+                child: IconButton(
+                  tooltip: '发送文件',
+                  icon: _sending
+                      ? const SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: ChordColors.blurple))
+                      : const Icon(Icons.attach_file,
+                          color: ChordColors.textMuted, size: 22),
+                  onPressed: _sending ? null : _attach,
+                ),
+              ),
             PopupMenuButton<String>(
               tooltip: '表情',
               icon: const Icon(Icons.emoji_emotions_outlined,

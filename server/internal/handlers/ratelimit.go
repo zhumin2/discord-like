@@ -1,0 +1,76 @@
+package handlers
+
+import (
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+// ---- 固定窗口限流器（单实例内存版；多实例时可切换 Redis 实现） ----
+
+type rlBucket struct {
+	count int
+	start time.Time
+}
+
+type rateLimiter struct {
+	mu      sync.Mutex
+	max     int
+	window  time.Duration
+	buckets map[string]*rlBucket
+}
+
+func newRateLimiter(max int, window time.Duration) *rateLimiter {
+	return &rateLimiter{max: max, window: window, buckets: map[string]*rlBucket{}}
+}
+
+// allow 惰性过期：窗口未满则计数+1 并放行；越界返回 false。
+func (l *rateLimiter) allow(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	b, ok := l.buckets[key]
+	if !ok || now.Sub(b.start) >= l.window {
+		// 顺带做一次低成本的过期清理，防止 map 无限增长
+		if len(l.buckets) > 4096 {
+			for k, v := range l.buckets {
+				if now.Sub(v.start) >= l.window {
+					delete(l.buckets, k)
+				}
+			}
+		}
+		l.buckets[key] = &rlBucket{count: 1, start: now}
+		return true
+	}
+	b.count++
+	return b.count <= l.max
+}
+
+// limitIP 按 IP 限流（用于匿名接口：注册/登录）。
+func (s *Server) limitIP(max int, window time.Duration, scope string) gin.HandlerFunc {
+	l := newRateLimiter(max, window)
+	return func(c *gin.Context) {
+		if !l.allow(c.ClientIP() + "|" + scope) {
+			c.AbortWithStatusJSON(429, gin.H{"error": "操作过于频繁，请稍后再试"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// limitUser 按用户 ID 限流（用于登录后接口：发消息/上传）。
+func (s *Server) limitUser(max int, window time.Duration, scope string) gin.HandlerFunc {
+	l := newRateLimiter(max, window)
+	return func(c *gin.Context) {
+		uid := c.GetString("userID")
+		if uid == "" {
+			uid = c.ClientIP()
+		}
+		if !l.allow(uid + "|" + scope) {
+			c.AbortWithStatusJSON(429, gin.H{"error": "操作过于频繁，请稍后再试"})
+			return
+		}
+		c.Next()
+	}
+}

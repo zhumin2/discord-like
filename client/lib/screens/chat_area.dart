@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../file_picker.dart';
 import '../models.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
@@ -152,6 +153,9 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                               ref.read(chatProvider.notifier).editMessage(id, content),
                           onDelete: (id) =>
                               ref.read(chatProvider.notifier).deleteMessage(id),
+                          resolveUrl: (u) => u.startsWith('http')
+                              ? u
+                              : ref.read(serverBaseProvider) + u,
                         );
                       },
                     ),
@@ -187,9 +191,22 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
           isDM: widget.isDM,
           onSend: (text) => ref.read(chatProvider.notifier).send(widget.channelId, text),
           onTyping: () => ref.read(chatProvider.notifier).notifyTyping(widget.channelId),
+          onAttach: () => _attachFile(),
         ),
       ],
     );
+  }
+
+  /// v1.1 附件：选文件 → 上传 → 生成要插入输入框的 Markdown 文本。
+  Future<String?> _attachFile() async {
+    final api = ref.read(apiProvider);
+    if (api == null) return null;
+    final picked = await pickFile(imagesOnly: false);
+    if (picked == null) return null;
+    final url = await api.upload(picked.bytes, picked.name);
+    final ext = picked.name.toLowerCase().split('.').last;
+    final isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].contains(ext);
+    return isImage ? '\n![]($url)\n' : '[${picked.name}]($url)\n';
   }
 }
 
