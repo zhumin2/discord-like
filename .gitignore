@@ -1,0 +1,36 @@
+# ===== 秘密（绝不提交）=====
+server/.data/
+
+# ===== 构建产物 =====
+client/build/
+gui/build/
+app/
+console/
+server/*.exe
+logs/
+*.log
+
+# ===== Flutter / Dart =====
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+client/windows/flutter/ephemeral/
+gui/windows/flutter/ephemeral/
+
+# ===== Node（GUI 测试工具）=====
+scripts/guitest/node_modules/
+scripts/guitest/package-lock.json
+
+# ===== 测试截图留档 =====
+scripts/guitest/shots/
+
+# ===== 系统/编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# ===== 会话/备份临时文件 =====
+.zcode/
+*~

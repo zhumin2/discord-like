@@ -1,0 +1,67 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/joho/godotenv"
+
+	"chord/server/internal/util"
+)
+
+type Config struct {
+	Port       string
+	DBDSN      string
+	RedisAddr  string // 为空则使用进程内实现（单实例开发模式）
+	JWTSecret  string
+	SeedDemo   bool
+	ClientOrigins []string // 允许的 CORS 来源，空则允许全部（开发模式）
+}
+
+// Load 读取 .env（若存在）与环境变量。DSN/Secret 提供开发期默认值，
+// 使 `go run ./cmd/server` 在全新机器上也能直接启动。
+func Load() *Config {
+	_ = godotenv.Load() // 忽略错误：.env 可选
+	// 同时尝试 server/.env（以仓库根启动时）
+	if _, err := os.Stat(filepath.Join("server", ".env")); err == nil {
+		_ = godotenv.Load(filepath.Join("server", ".env"))
+	}
+
+	secret := getEnv("JWT_SECRET", "")
+	if secret == "" {
+		// 开发环境：无 secret 时生成并持久化，保证重启后 token 仍有效
+		secret = loadOrCreateSecret(util.RandomHex(48))
+	}
+
+	return &Config{
+		Port:      getEnv("PORT", "8081"),
+		DBDSN:     getEnv("DB_DSN", "root:@tcp(127.0.0.1:3306)/chord?charset=utf8mb4&parseTime=True&loc=Local"),
+		// 默认尝试本机 6379（go run ./cmd/fakeredis 或真 Redis）；
+		// 连不上时 bus.NewRedis 自动降级为进程内事件总线
+		RedisAddr: getEnv("REDIS_ADDR", "127.0.0.1:6379"),
+		JWTSecret: secret,
+		SeedDemo:  getEnv("SEED_DEMO", "true") == "true",
+		ClientOrigins: []string{
+			getEnv("CLIENT_ORIGIN", ""),
+			"http://localhost:3000",
+			"http://127.0.0.1:3000",
+		},
+	}
+}
+
+func getEnv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func loadOrCreateSecret(secret string) string {
+	const path = ".data/jwt_secret"
+	if b, err := os.ReadFile(path); err == nil && len(b) >= 32 {
+		return string(b)
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, []byte(secret), 0o600)
+	return secret
+}
