@@ -384,6 +384,17 @@ APK 为 debug 签名；Windows 无代码签名（图片已在客户端上传前�
 4. **发布前务必执行第 8.4 节清单**——v1.1 的 5 个 bug 全部是"部署了但没生效/没生效却以为生效"。
 5. 涉及部署变更时同步更新 `deploy/部署说明.md` 与本文件第五节。
 
+### 8.6 桌面端最小化到托盘（v1.2.2）
+
+聊天客户端与控制台都实现了"点 X 隐藏到托盘"（原生 Win32，无插件）：
+
+- 客户端：`client/windows/runner/tray_manager.{h,cpp}`；控制台：`gui/windows/runner/tray_manager.{h,cpp}`
+- `flutter_window.cpp` 拦截 `WM_CLOSE` → `HideWindowToTray`；托盘回调 `WM_APP+1`
+- 托盘菜单：客户端「打开 Chord / 退出」；控制台「打开控制台 / 打开网页 / 退出」
+- 隐藏后进程与 WebSocket 继续运行（消息照常接收），只有托盘菜单「退出」真正退出
+- 修改这两个文件同样需要 UTF-8 BOM（runner 已加 `/utf-8`，BOM 是保险）
+- 验证：PostMessage WM_CLOSE 后 `IsWindowVisible=false` 且进程存活
+
 ### 8.5 图片上传前压缩（v1.1.8）
 
 跨境带宽很窄（实测 10-50KB/s），原图直传会长时间卡住。客户端 `client/lib/image_compress.dart`
