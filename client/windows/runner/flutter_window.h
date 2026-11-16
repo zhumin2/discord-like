@@ -1,4 +1,4 @@
-#ifndef RUNNER_FLUTTER_WINDOW_H_
+﻿#ifndef RUNNER_FLUTTER_WINDOW_H_
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "tray_manager.h"
 #include "win32_window.h"
 
 // A window that does nothing but host a Flutter view.
@@ -28,6 +29,10 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // 系统托盘：点 X 隐藏到托盘，程序与 WebSocket 连接继续运行
+  TrayManager tray_;
+  HWND hwnd_for_tray_ = nullptr;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

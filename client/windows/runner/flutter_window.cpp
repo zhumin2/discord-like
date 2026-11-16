@@ -86,6 +86,10 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
 
+  // 安装系统托盘图标（点 X = 隐藏到托盘，消息继续实时接收）
+  hwnd_for_tray_ = GetHandle();
+  tray_.Install(hwnd_for_tray_);
+
   RECT frame = GetClientArea();
 
   // The size here must match the window dimensions to avoid unnecessary surface
@@ -113,6 +117,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  tray_.Remove(hwnd_for_tray_);
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -135,6 +140,18 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_CLOSE:
+      // 点 X：隐藏到系统托盘而不是退出（托盘菜单「退出」才真正关闭）
+      tray_.HideWindowToTray(hwnd);
+      return 0;
+    case WM_APP + 1:  // 托盘图标回调
+      if (tray_.HandleNotification(hwnd, wparam, lparam)) {
+        return 0;
+      }
+      break;
+    case WM_DESTROY:
+      tray_.Remove(hwnd);
+      break;
     case WM_GETMINMAXINFO: {
       // 最小窗口尺寸（逻辑像素，按 DPI 缩放）
       auto info = reinterpret_cast<MINMAXINFO*>(lparam);
