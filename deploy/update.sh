@@ -4,6 +4,7 @@
 #
 # 用法（在服务器上以 root 执行）：
 #   sudo bash update.sh web    # 更新 Web 前端（含静态服务器二进制，不需要数据库密码）
+#   sudo bash update.sh server # 只更新后端/静态服务器二进制（不需要数据库密码）
 #   sudo MYSQL_PASS='数据库root密码' bash update.sh full   # 全量重装（后端+前端+.env+服务）
 #
 # 环境变量（可选）：
@@ -101,6 +102,59 @@ update_web() {
 if [ "$MODE" = "web" ]; then
     update_web
 
+elif [ "$MODE" = "server" ]; then
+    # 仅更新后端/静态服务器二进制（不动 .env / 数据库），适用于后端代码有变更的版本
+    info "拉取全量部署包（只取二进制）…"
+    curl -fL --connect-timeout 15 -o "$TMP/deploy.tgz" "${BASE_URL}/chord-deploy.tar.gz" \
+        || fail "下载失败（检查网络或 Release 是否存在）"
+    tar xzf "$TMP/deploy.tgz" -C "$TMP"
+    PKG="$TMP/package"
+    [ -f "$PKG/chord-server" ] || fail "压缩包结构异常：缺少 chord-server"
+
+    mkdir -p "$TMP/backup"
+    cp -a "${INSTALL_DIR}/server/chord-server" "$TMP/backup/" 2>/dev/null || true
+    cp -a "${INSTALL_DIR}/web/serveweb" "$TMP/backup/" 2>/dev/null || true
+
+    server_rollback() {
+        trap - ERR
+        warn "回滚二进制…"
+        systemctl stop chord-server chord-web 2>/dev/null || true
+        [ -f "$TMP/backup/chord-server" ] && install -m 0755 "$TMP/backup/chord-server" "${INSTALL_DIR}/server/chord-server" || true
+        [ -f "$TMP/backup/serveweb" ] && install -m 0755 "$TMP/backup/serveweb" "${INSTALL_DIR}/web/serveweb" || true
+        systemctl start chord-server chord-web 2>/dev/null || true
+        fail "更新失败，已回滚。检查：journalctl -u chord-server -n 50 --no-pager"
+    }
+    trap 'server_rollback' ERR
+
+    info "替换二进制…"
+    systemctl stop chord-server chord-web 2>/dev/null || true
+    install -m 0755 "$PKG/chord-server" "${INSTALL_DIR}/server/chord-server.new"
+    mv -f "${INSTALL_DIR}/server/chord-server.new" "${INSTALL_DIR}/server/chord-server"
+    if [ -f "$PKG/serveweb" ]; then
+        install -m 0755 "$PKG/serveweb" "${INSTALL_DIR}/web/serveweb.new"
+        mv -f "${INSTALL_DIR}/web/serveweb.new" "${INSTALL_DIR}/web/serveweb"
+    fi
+    if [ -f "$PKG/redisprobe" ]; then
+        install -m 0755 "$PKG/redisprobe" "${INSTALL_DIR}/server/redisprobe" || true
+    fi
+    if [ -f "$PKG/update.sh" ]; then
+        install -m 0755 "$PKG/update.sh" "${INSTALL_DIR}/update.sh" || true
+    fi
+    chown -R "${RUN_USER}:${RUN_USER}" "${INSTALL_DIR}" 2>/dev/null \
+        || warn "chown 失败（不影响运行，请检查 ${INSTALL_DIR} 归属）"
+
+    info "启动服务并探活…"
+    systemctl start chord-server chord-web
+    local_api="${API_PORT:-8081}"
+    ok=0
+    for _ in $(seq 1 15); do
+        if curl -fs -o /dev/null --max-time 3 "http://127.0.0.1:${local_api}/api/health" 2>/dev/null; then ok=1; break; fi
+        sleep 1
+    done
+    [ "$ok" = "1" ] || server_rollback
+    trap - ERR
+    info "后端已更新（API 健康检查通过 :${local_api}）。数据库迁移在后端启动时自动执行。"
+
 elif [ "$MODE" = "full" ]; then
     : "${MYSQL_PASS:?full 模式需要数据库密码：sudo MYSQL_PASS='数据库root密码' bash update.sh full}"
     info "拉取最新全量部署包…"
@@ -112,8 +166,9 @@ elif [ "$MODE" = "full" ]; then
     info "全量更新完成。"
 
 else
-    echo "用法: sudo bash update.sh [web|full]"
-    echo "  web  = 更新 Web 前端（含静态服务器）"
-    echo "  full = 全量重装（需要 MYSQL_PASS）"
+    echo "用法: sudo bash update.sh [web|server|full]"
+    echo "  web    = 更新 Web 前端（含静态服务器）"
+    echo "  server = 只更新后端/静态服务器二进制（后端有改动时用）"
+    echo "  full   = 全量重装（需要 MYSQL_PASS）"
     exit 1
 fi
