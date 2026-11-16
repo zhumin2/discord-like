@@ -6,6 +6,7 @@ import '../file_picker.dart';
 import '../models.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
+import '../image_compress.dart';
 import '../widgets/composer.dart';
 import '../widgets/message_tile.dart';
 
@@ -197,14 +198,16 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
     );
   }
 
-  /// v1.1 附件：选文件 → 上传 → 生成要插入输入框的 Markdown 文本。
+  /// v1.1 附件：选文件 → （图片）压缩 → 上传 → 生成要插入输入框的 Markdown 文本。
   Future<String?> _attachFile() async {
     final api = ref.read(apiProvider);
     if (api == null) return null;
     final picked = await pickFile(imagesOnly: false);
     if (picked == null) return null;
-    final url = await api.upload(picked.bytes, picked.name);
-    final ext = picked.name.toLowerCase().split('.').last;
+    // 跨境带宽窄，图片先压缩再传（最长边 1600、JPEG q82；异常自动回退原图）
+    final ready = await compressImageIfNeeded(picked.bytes, picked.name);
+    final url = await api.upload(ready.bytes, ready.name);
+    final ext = ready.name.toLowerCase().split('.').last;
     final isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].contains(ext);
     return isImage ? '\n![]($url)\n' : '[${picked.name}]($url)\n';
   }

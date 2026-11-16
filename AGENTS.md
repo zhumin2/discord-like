@@ -360,7 +360,7 @@ for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code} " -X POST <api>/a
 ## 十、已知限制 / 待办
 
 **v1.1 遗留**：TLS 待域名（`deploy/caddy/Caddyfile` 已就绪）；CDN 未接入；每日备份 cron 未配置；
-客户端图片未做上传前压缩；APK 为 debug 签名；Windows 无代码签名。
+APK 为 debug 签名；Windows 无代码签名（图片已在客户端上传前压缩，见 8.5）。
 
 **路线图**（详见 `docs/ROADMAP.md`）：
 1. **v1.2 社群成长**：角色权限体系（role 表 + 权限点 + UI）、消息搜索（MySQL ngram 全文索引）、
@@ -383,3 +383,20 @@ for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code} " -X POST <api>/a
 3. 改完代码先跑 `go vet ./... && go test ./...`；UI 改动用 `scripts/guitest` 走查。
 4. **发布前务必执行第 8.4 节清单**——v1.1 的 5 个 bug 全部是"部署了但没生效/没生效却以为生效"。
 5. 涉及部署变更时同步更新 `deploy/部署说明.md` 与本文件第五节。
+
+### 8.5 图片上传前压缩（v1.1.8）
+
+跨境带宽很窄（实测 10-50KB/s），原图直传会长时间卡住。客户端 `client/lib/image_compress.dart`
+在选择文件后、上传前压缩（纯 Dart `image` 包，无平台插件，跨三端一致）：
+
+- 仅处理 JPEG/PNG；GIF/WebP/其他文件原样上传
+- <200KB 的小图直接放行
+- 最长边 >1600 等比缩放（平均插值）
+- JPEG q82 起，若结果 >500KB 自动逐级降质量（最低 55）
+- PNG 带透明通道时重新编码为 PNG（保留透明），否则转 JPEG
+- 任何异常 / 压缩后更大 ⇒ 回退原图，绝不阻断发送
+- 压缩在后台 isolate（`compute`）执行，不卡界面
+
+实测：3000×2000 噪声图 11.7MB → 476KB；真实照片通常 150-250KB。
+**注意**：服务端 `/api/upload` 仍只做 10MB + 扩展名白名单校验，压缩完全在客户端；
+若将来有第三方客户端，考虑加服务端兜底压缩。
