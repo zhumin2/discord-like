@@ -1,0 +1,75 @@
+name: release-web
+
+# 打 tag（v*）时自动构建 Web 产物并上传到对应 Release。
+# 为什么在 CI 构建：本机网络无法向 GitHub 上传 Release 附件（触发了 abuse 检测 403），
+# 由 GitHub 自己的 runner 上传即可绕过；同时保证产物可复现（源码 + 固定 Flutter 版本）。
+#
+# 手动触发：Actions 页面 → release-web → Run workflow（tag 填已存在的 tag 名）
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建并发布的 tag（如 v1.1.2）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+          cache: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+
+      - name: Build web bundle
+        working-directory: client
+        run: |
+          flutter pub get
+          # --no-web-resources-cdn：CanvasKit 本地化（gstatic 在国内不可达）
+          # --web-content-hash：文件名带哈希，配合 serveweb 的 immutable 缓存
+          flutter build web --release --no-web-resources-cdn --web-content-hash
+
+      - name: Build serveweb (linux/amd64)
+        working-directory: server
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/serveweb" ./cmd/serveweb
+
+      - name: Package chord-web-update.tar.gz
+        run: |
+          mkdir -p pkg/web
+          cp -r client/build/web/. pkg/web/
+          cp serveweb pkg/web/serveweb
+          chmod +x pkg/web/serveweb
+          tar czf chord-web-update.tar.gz -C pkg web
+          ls -lh chord-web-update.tar.gz
+          tar tzf chord-web-update.tar.gz | grep -E "web/serveweb$|web/main\.dart\..*js$" | head -3
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            chord-web-update.tar.gz
+            deploy/update.sh
+          fail_on_unmatched_files: true

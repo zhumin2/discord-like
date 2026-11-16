@@ -31,6 +31,15 @@ if [ "$MODE" = "web" ]; then
     curl -fL --connect-timeout 15 -o "$TMP/web.tgz" "${BASE_URL}/chord-web-update.tar.gz"
     tar xzf "$TMP/web.tgz" -C "$TMP"
     systemctl stop chord-web 2>/dev/null || true
+
+    # 若包内附带静态服务器二进制（serveweb），一并升级——缓存策略/压缩等改动都随它生效
+    if [ -f "$TMP/web/serveweb" ]; then
+        info "更新静态服务器 serveweb…"
+        install -m 755 -o root -g root "$TMP/web/serveweb" "${INSTALL_DIR}/web/serveweb.new"
+        mv -f "${INSTALL_DIR}/web/serveweb.new" "${INSTALL_DIR}/web/serveweb"
+        rm -f "$TMP/web/serveweb"   # 不要留在 htdocs 里（会被公开下载）
+    fi
+
     rm -rf "${INSTALL_DIR}/web/htdocs"
     cp -r "$TMP/web" "${INSTALL_DIR}/web/htdocs"
     chown -R "${RUN_USER}:${RUN_USER}" "${INSTALL_DIR}/web"
