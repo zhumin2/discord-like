@@ -1,0 +1,114 @@
+name: release-clients
+
+# 构建 Windows 客户端与 Android APK，并上传到指定 tag 的 Release。
+#
+# 背景：v1.1.2 起改为「打 tag → 自动发 Web」，但早期 Release 里的客户端附件（Windows zip / APK）
+# 不会被带到新 Release；一旦新版本成为 latest，README 里的
+# releases/latest/download/chord-windows-x64.zip 就会 404。
+# 本工作流保证每个版本的 Release 都带齐三端产物。
+#
+# 触发：
+#   - 推 tag v*：与 release-web 并行，自动补齐客户端
+#   - 手动：Actions → release-clients → Run workflow（填已存在的 tag，用于补发历史版本）
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建并上传客户端的 tag（如 v1.1.3）'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  API_BASE: http://129.226.159.168:8081
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+          cache: true
+
+      - name: Build Windows client
+        working-directory: client
+        shell: bash
+        run: |
+          flutter pub get
+          flutter build windows --release --dart-define=CHORD_DEFAULT_BASE=${{ env.API_BASE }}
+
+      - name: Package zip
+        shell: python
+        run: |
+          import os, zipfile, pathlib, shutil
+          src = pathlib.Path("client/build/windows/x64/runner/Release")
+          assert src.is_dir(), f"缺少构建产物: {src}"
+          # 可执行文件改中文名（zip 内文件名用 UTF-8 标志，兼容 Windows 解压）
+          exe = src / "chord_client.exe"
+          if exe.exists():
+              exe.rename(src / "Chord聊天.exe")
+          out = pathlib.Path("chord-windows-x64.zip")
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+              for p in src.rglob("*"):
+                  if p.is_file():
+                      z.write(p, p.relative_to(src))
+          print("打包完成:", out.stat().st_size / 1048576, "MB")
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: chord-windows-x64.zip
+          fail_on_unmatched_files: true
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+          cache: true
+
+      - name: Build APKs
+        working-directory: client
+        run: |
+          flutter pub get
+          flutter build apk --release --split-per-abi --dart-define=CHORD_DEFAULT_BASE=${{ env.API_BASE }}
+          flutter build apk --release --dart-define=CHORD_DEFAULT_BASE=${{ env.API_BASE }}
+
+      - name: Collect artifacts
+        run: |
+          cd client/build/app/outputs/flutter-apk
+          ls -lh *.apk
+          cp app-arm64-v8a-release.apk  "$GITHUB_WORKSPACE/chord-arm64.apk"
+          cp app-armeabi-v7a-release.apk "$GITHUB_WORKSPACE/chord-armv7.apk"
+          cp app-release.apk             "$GITHUB_WORKSPACE/chord-universal.apk"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            chord-arm64.apk
+            chord-armv7.apk
+            chord-universal.apk
+          fail_on_unmatched_files: true
