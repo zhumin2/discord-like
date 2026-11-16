@@ -28,6 +28,7 @@ class GuildRail extends ConsumerWidget {
             selected: chat.guildId == null,
             label: '私信',
             color: ChordColors.blurple,
+            badge: _dmBadge(chat),
             child: const Icon(Icons.forum_outlined, color: Colors.white, size: 26),
             onTap: onOpenDMs,
           ),
@@ -71,6 +72,15 @@ class GuildRail extends ConsumerWidget {
     var n = 0;
     for (final c in chs) {
       n += chat.summary[c.id]?.unread ?? 0;
+    }
+    return n;
+  }
+
+  /// 私信总未读（所有 DM 会话之和），显示在左上角消息图标上。
+  int _dmBadge(ChatState chat) {
+    var n = 0;
+    for (final d in chat.dms) {
+      n += chat.summary[d.id]?.unread ?? 0;
     }
     return n;
   }
