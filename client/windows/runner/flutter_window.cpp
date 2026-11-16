@@ -102,6 +102,27 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   RegisterFileChannel(flutter_controller_->engine());
+
+  // Dart → 原生：未读数上报（托盘角标 + 提示文字）
+  app_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "chord/app",
+      &flutter::StandardMethodCodec::GetInstance());
+  app_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() != "setBadge") {
+          result->NotImplemented();
+          return;
+        }
+        const auto* n = std::get_if<int32_t>(call.arguments());
+        if (n == nullptr) {
+          result->Error("bad_args", "setBadge expects int");
+          return;
+        }
+        tray_.SetBadge(*n);
+        result->Success();
+      });
+
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -149,6 +170,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         return 0;
       }
       break;
+    case WM_APP + 2:  // 另一个实例启动时请求唤起本窗口
+      tray_.RestoreWindow(hwnd);
+      return 0;
     case WM_DESTROY:
       tray_.Remove(hwnd);
       break;

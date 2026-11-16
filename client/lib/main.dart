@@ -1,10 +1,26 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'state/app_state.dart';
 import 'theme.dart';
+
+/// 托盘未读角标：把未读总数同步给原生层（仅 Windows 桌面有效）。
+/// Web/Android 上该通道不存在，静默忽略。
+int _lastTrayBadge = -1;
+Future<void> _syncTrayBadge(int total) async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) return;
+  if (total == _lastTrayBadge) return;
+  _lastTrayBadge = total;
+  try {
+    await const MethodChannel('chord/app').invokeMethod('setBadge', total);
+  } catch (_) {
+    // 原生通道未注册（例如 flutter run 调试早期）时忽略
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,6 +37,13 @@ class ChordApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final token = ref.watch(tokenProvider);
     final chat = ref.watch(chatProvider);
+
+    // 未读总数变化 → 更新托盘角标（服务器频道 + 私信都计入 summary）
+    ref.listen<int>(
+      chatProvider.select((s) =>
+          s.summary.values.fold<int>(0, (a, x) => a + x.unread)),
+      (_, total) => _syncTrayBadge(total),
+    );
 
     return MaterialApp(
       title: 'Chord',

@@ -2,7 +2,9 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -33,6 +35,9 @@ class FlutterWindow : public Win32Window {
   // 系统托盘：点 X 隐藏到托盘，程序与 WebSocket 连接继续运行
   TrayManager tray_;
   HWND hwnd_for_tray_ = nullptr;
+
+  // Dart → 原生通道（chord/app）：上报未读数用于托盘角标
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> app_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -22,12 +22,18 @@ class TrayManager {
   // 从托盘恢复窗口。
   void RestoreWindow(HWND hwnd);
 
+  // 更新未读数：托盘提示显示"Chord - N 条未读"，图标右上角叠加红色数字。
+  void SetBadge(int count);
+
  private:
   void ShowContextMenu(HWND hwnd);
+  void UpdateIcon();
+  HICON MakeBadgedIcon(int count) const;
 
   NOTIFYICONDATAW nid_ = {};
   bool installed_ = false;
   bool balloon_shown_ = false;
+  int badge_ = 0;
 };
 
 #endif  // RUNNER_TRAY_MANAGER_H_
