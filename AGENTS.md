@@ -203,6 +203,7 @@
     已用 `scripts/fonts/subset_fonts.py` 子集化为 GB2312 共 7562 字（每字重 2.3MB，合计 4.6MB，覆盖约 99.7%），
     首屏降到 13MB（gzip 后约 5MB）。**生僻字会显示方框**；需更大覆盖用 `gb2312`/`level1` 参数，
     还原全量用 `--restore`（源文件备份为 `*.full.bak`，已 ignore）。改字体后必须重建并校验产物大小。
+    **分平台策略（v1.1.4 起）**：`client/assets/fonts/*.ttf` 是 GB2312 子集（Web 用，省带宽）；`client/assets/fonts/full/*.ttf` 是全量（30k 码位，含 頔玥喆 等生僻字），Windows/Android 构建前用 `cp client/assets/fonts/full/*.ttf client/assets/fonts/` 覆盖（CI 已在 release-clients 里做）。子集只覆盖 7547 字，缺失时界面显示方框，仅 Web 可接受。
 20. **Git Bash 会篡改 dart-define 里的绝对路径风格参数**：`--dart-define=X=/canvaskit/` 会被 MSYS 转成
     `C:/Program Files/Git/canvaskit/` 写进构建产物。带 `/` 开头的 define 必须加 `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`，
     并在产物里 `grep` 校验实际注入值。
@@ -264,9 +265,11 @@ cd client && flutter build web --release --no-web-resources-cdn --web-content-ha
 python -X utf8 -c "d=open('build/web/main.dart.js',encoding='utf-8',errors='ignore').read(); print(d.count(r'\u53d1\u9001\u6587\u4ef6'), d.count('/api/upload'))"
 
 # Windows 客户端（产物 build/windows/x64/runner/Release → 改名 exe 为 Chord聊天.exe，三件套同目录打 zip）
+# 桌面/移动用全量字体（不缺生僻字）；Web 才用子集
+cp client/assets/fonts/full/*.ttf client/assets/fonts/
 cd client && flutter build windows --release --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
 
-# Android（推荐 arm64；另两个 ABI 用 --split-per-abi 自动产出）
+# Android（推荐 arm64；另两个 ABI 用 --split-per-abi 自动产出；同样先用全量字体）
 cd client && flutter build apk --release --split-per-abi --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
 ```
 

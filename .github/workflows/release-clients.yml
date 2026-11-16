@@ -41,6 +41,10 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Use full fonts (desktop)
+        shell: bash
+        run: cp client/assets/fonts/full/*.ttf client/assets/fonts/
+
       - name: Build Windows client
         working-directory: client
         shell: bash
@@ -90,6 +94,9 @@ jobs:
           flutter-version: '3.50.0'
           channel: stable
           cache: true
+
+      - name: Use full fonts (mobile)
+        run: cp client/assets/fonts/full/*.ttf client/assets/fonts/
 
       - name: Build APKs
         working-directory: client

@@ -12,8 +12,8 @@
   python scripts/fonts/subset_fonts.py level1
   python scripts/fonts/subset_fonts.py gb2312
 
-输出覆盖 client/assets/fonts/NotoSansSC-{Regular,Bold}.ttf（原文件备份为
-NotoSansSC-*.full.ttf.bak，可用 --restore 还原）。
+输出覆盖 client/assets/fonts/NotoSansSC-{Regular,Bold}.ttf（Web 用子集）；
+全量字体常驻 client/assets/fonts/full/，供 Windows/Android 构建覆盖使用。
 """
 import argparse
 import shutil
@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 FONTS_DIR = Path(__file__).resolve().parents[2] / "client" / "assets" / "fonts"
+FULL_DIR = FONTS_DIR / "full"   # 全量字体（Windows/Android 构建时覆盖回来）
 FILES = ["NotoSansSC-Regular.ttf", "NotoSansSC-Bold.ttf"]
 
 
@@ -63,11 +64,12 @@ def main() -> int:
 
     for name in FILES:
         src = FONTS_DIR / name
-        bak = FONTS_DIR / (name + ".full.bak")
+        bak = FULL_DIR / name
+        FULL_DIR.mkdir(parents=True, exist_ok=True)
         if args.restore:
             if bak.exists():
                 shutil.copy2(bak, src)
-                print(f"还原 {name} ← {bak.name}")
+                print(f"还原 {name} ← full/{name}")
             else:
                 print(f"跳过 {name}（无备份）")
             continue
@@ -75,7 +77,7 @@ def main() -> int:
             print(f"缺少 {src}")
             return 1
         if not bak.exists():
-            shutil.copy2(src, bak)  # 首次运行备份全量字体
+            shutil.copy2(src, bak)  # 兼容：full/ 缺失时用当前文件兜底
 
     if args.restore:
         return 0
@@ -86,7 +88,7 @@ def main() -> int:
     print(f"字符集: {args.level}，共 {len(chars)} 个字符")
 
     for name in FILES:
-        src_full = FONTS_DIR / (name + ".full.bak")
+        src_full = FULL_DIR / name
         out = FONTS_DIR / name
         before = out.stat().st_size if out.exists() else 0
         cmd = [
