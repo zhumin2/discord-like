@@ -384,6 +384,16 @@ APK 为 debug 签名；Windows 无代码签名（图片已在客户端上传前�
 4. **发布前务必执行第 8.4 节清单**——v1.1 的 5 个 bug 全部是"部署了但没生效/没生效却以为生效"。
 5. 涉及部署变更时同步更新 `deploy/部署说明.md` 与本文件第五节。
 
+### 8.7 桌面单实例 + 托盘未读角标（v1.2.3）
+
+- **单实例**：`main.cpp` 创建命名互斥量 `Local\ChordChatSingleInstance`；已存在时
+  `FindWindowW(nullptr, L"Chord")` 找到原窗口 → `ShowWindow` + `PostMessage(WM_APP+2)`（让原实例从托盘恢复）
+  然后退出。窗口标题必须保持 `"Chord"`，否则 FindWindow 失效。
+- **托盘未读角标**：Dart 监听 `chatProvider.summary` 求和 → `MethodChannel('chord/app').setBadge(int)`；
+  原生 `TrayManager::SetBadge` 更新 tooltip（"Chord - N 条未读"）并用 GDI 在图标右上角画红圈数字（>9 显示 9+）。
+  GDI 画的 32bpp 位图 alpha 会是 0（全透明），必须用 `ForceOpaque()` 把 alpha 置 255。
+- 验证方式：`SystemTray.NormalButton` 的 UI Automation Name = tooltip；导出图标 BMP 目视检查数字。
+
 ### 8.6 桌面端最小化到托盘（v1.2.2）
 
 聊天客户端与控制台都实现了"点 X 隐藏到托盘"（原生 Win32，无插件）：
