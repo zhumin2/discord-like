@@ -207,6 +207,7 @@
 20. **Git Bash 会篡改 dart-define 里的绝对路径风格参数**：`--dart-define=X=/canvaskit/` 会被 MSYS 转成
     `C:/Program Files/Git/canvaskit/` 写进构建产物。带 `/` 开头的 define 必须加 `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`，
     并在产物里 `grep` 校验实际注入值。
+21. **聊天记录顺序**：服务端 `ListMessages` 已把结果翻成时间正序返回（旧→新）；客户端 `_loadMessages` **不能再 reversed**，否则历史倒序（新消息在上）。UI 用 `ListView(reverse:true)`，列表末尾（最新）渲染在最下方。该 bug 自 MVP 就存在，因新消息走 WS 追加到末尾看似正常而长期未发现（v1.1.6 修复）。
 
 ---
 
