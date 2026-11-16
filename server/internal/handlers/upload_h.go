@@ -95,12 +95,14 @@ func (s *Server) serveUpload(c *gin.Context) {
 	// gin 通配参数自带前导 "/"，剥掉后校验：拒绝 .. 与反斜杠（防穿越）
 	rel := strings.TrimPrefix(c.Param("filepath"), "/")
 	if strings.Contains(rel, "..") || strings.Contains(rel, "\\") {
+		c.Header("Cache-Control", "no-store") // 错误响应绝不缓存，避免坏响应粘住
 		fail(c, 400, "非法路径")
 		return
 	}
 	full := filepath.Join(s.Cfg.UploadDir, filepath.FromSlash(rel))
 	fi, err := os.Stat(full)
 	if err != nil || fi.IsDir() {
+		c.Header("Cache-Control", "no-store")
 		fail(c, 404, "文件不存在")
 		return
 	}
