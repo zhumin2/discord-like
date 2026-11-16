@@ -92,9 +92,9 @@ func (s *Server) Upload(c *gin.Context) {
 
 // serveUpload 公开读取上传文件：文件名是不可猜测的 UUID，链接随消息自然共享。
 func (s *Server) serveUpload(c *gin.Context) {
-	rel := c.Param("filepath")
-	// 防穿越：拒绝任何 .. 与绝对路径成分
-	if strings.Contains(rel, "..") || strings.HasPrefix(rel, "/") && filepath.IsAbs(rel) {
+	// gin 通配参数自带前导 "/"，剥掉后校验：拒绝 .. 与反斜杠（防穿越）
+	rel := strings.TrimPrefix(c.Param("filepath"), "/")
+	if strings.Contains(rel, "..") || strings.Contains(rel, "\\") {
 		fail(c, 400, "非法路径")
 		return
 	}

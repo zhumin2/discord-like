@@ -118,15 +118,43 @@ func TestServeUploadBlocksTraversal(t *testing.T) {
 	s, dir := newUploadServer(t)
 	os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("top-secret"), 0o644)
 
+	cases := []struct {
+		label string
+		param string // gin 通配捕获（含前导斜杠）
+	}{
+		{"父目录穿越", "/../secret.txt"},
+		{"多层穿越", "/202611/../../secret.txt"},
+		{"反斜杠穿越", "/..\\secret.txt"},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest("GET", "/uploads"+tc.param, nil)
+		c.Params = gin.Params{{Key: "filepath", Value: tc.param}}
+		c.Request.URL.Path = "/uploads" + tc.param
+		c.Writer = &closeNotifyingRecorder{rec}
+		s.serveUpload(c)
+		if rec.Code == 200 && strings.Contains(rec.Body.String(), "top-secret") {
+			t.Fatalf("路径穿越攻击成功（%s）——serveUpload 防护失效！", tc.label)
+		}
+	}
+}
+
+func TestServeUploadServesNormalFile(t *testing.T) {
+	s, dir := newUploadServer(t)
+	sub := filepath.Join(dir, "202611")
+	os.MkdirAll(sub, 0o755)
+	os.WriteFile(filepath.Join(sub, "a.png"), []byte("PNGDATA"), 0o644)
+
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest("GET", "/uploads/../secret.txt", nil)
-	c.Params = gin.Params{{Key: "filepath", Value: "/../secret.txt"}}
-	c.Request.URL.Path = "/uploads/../secret.txt"
+	c.Request = httptest.NewRequest("GET", "/uploads/202611/a.png", nil)
+	c.Params = gin.Params{{Key: "filepath", Value: "/202611/a.png"}}
+	c.Request.URL.Path = "/uploads/202611/a.png"
 	c.Writer = &closeNotifyingRecorder{rec}
 	s.serveUpload(c)
 
-	if rec.Code == 200 && strings.Contains(rec.Body.String(), "top-secret") {
-		t.Fatal("路径穿越攻击成功——serveUpload 防护失效！")
+	if rec.Code != 200 || rec.Body.String() != "PNGDATA" {
+		t.Fatalf("正常文件应 200 返回内容，得到 %d:%s", rec.Code, rec.Body.String())
 	}
 }
