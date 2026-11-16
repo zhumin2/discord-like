@@ -35,3 +35,10 @@ Thumbs.db
 .zcode/
 *~
 discord-project.bundle
+
+# ===== 字体全量备份（subset_fonts.py 生成，勿入库）=====
+client/assets/fonts/*.full.bak
+
+# ===== Python =====
+__pycache__/
+*.pyc

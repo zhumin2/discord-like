@@ -195,6 +195,16 @@
     skwasm 卡死、`flutter-view` 永不创建）。本项目必须用普通 `--release`（CanvasKit/dart2js）；
     serveweb 的 wasm MIME 是为 canvaskit.wasm 服务的，与 dart2wasm 无关。
 17. **限流测试会吃掉自己 IP 的配额**（登录 10 次/分）：测完需等 65 秒再登录，否则拿到 429。
+18. **CanvasKit 默认从 gstatic CDN 加载**（`useLocalCanvasKit:false` → `www.gstatic.com/flutter-canvaskit/<rev>/`），
+    国内直接卡死/白屏。**Web 构建必须加 `--no-web-resources-cdn`**（本地优先请求 `canvaskit/chromium/canvaskit.wasm` 5.3MB）。
+    仅设 `--dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/` **不够**——那是 Dart 层兜底，JS 加载器仍走 CDN。
+19. **中文字体是首屏最大负担**：全量 NotoSansSC 每字重 10MB，两字重 20MB（实测首屏共 28.5MB）。
+    已用 `scripts/fonts/subset_fonts.py` 子集化为 GB2312 共 7562 字（每字重 2.3MB，合计 4.6MB，覆盖约 99.7%），
+    首屏降到 13MB（gzip 后约 5MB）。**生僻字会显示方框**；需更大覆盖用 `gb2312`/`level1` 参数，
+    还原全量用 `--restore`（源文件备份为 `*.full.bak`，已 ignore）。改字体后必须重建并校验产物大小。
+20. **Git Bash 会篡改 dart-define 里的绝对路径风格参数**：`--dart-define=X=/canvaskit/` 会被 MSYS 转成
+    `C:/Program Files/Git/canvaskit/` 写进构建产物。带 `/` 开头的 define 必须加 `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`，
+    并在产物里 `grep` 校验实际注入值。
 
 ---
 
@@ -246,7 +256,8 @@ cd server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="
 go vet ./... && go test ./internal/handlers/     # 测试
 
 # Web（必须 cd client/；默认地址按需改）
-cd client && flutter build web --release --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
+# ⚠️ 必须带 --no-web-resources-cdn：否则 CanvasKit 从 www.gstatic.com 拉（国内被墙 → 白屏/极慢）
+cd client && flutter build web --release --no-web-resources-cdn --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
 # 校验产物含新代码（关键！）：
 python -X utf8 -c "d=open('build/web/main.dart.js',encoding='utf-8',errors='ignore').read(); print(d.count(r'\u53d1\u9001\u6587\u4ef6'), d.count('/api/upload'))"
 
