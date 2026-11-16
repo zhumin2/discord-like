@@ -46,6 +46,10 @@ mkdir -p "${INSTALL_DIR}/server" "${INSTALL_DIR}/web/htdocs" "${INSTALL_DIR}/ser
 install -m 0755 chord-server "${INSTALL_DIR}/server/chord-server"
 install -m 0755 serveweb     "${INSTALL_DIR}/web/serveweb"
 cp -r web/. "${INSTALL_DIR}/web/htdocs/"
+# update.sh 装到 /opt/chord，供 update.sh web|full 全局调用（包内缺失则跳过）
+if [ -f update.sh ]; then
+    install -m 0755 update.sh "${INSTALL_DIR}/update.sh"
+fi
 
 # ---------- 2. 运行用户 ----------
 if ! id "${RUN_USER}" >/dev/null 2>&1; then
@@ -64,9 +68,12 @@ REDIS_ADDR=${REDIS_ADDR}
 JWT_SECRET=
 SEED_DEMO=${SEED_DEMO}
 CLIENT_ORIGIN=http://${SERVER_IP}:${WEB_PORT}
+UPLOAD_DIR=${INSTALL_DIR}/data/uploads
 EOF
 chmod 600 "${INSTALL_DIR}/server/.env"
 chown "${RUN_USER}:${RUN_USER}" "${INSTALL_DIR}/server/.env"
+mkdir -p "${INSTALL_DIR}/data/uploads"
+chown -R "${RUN_USER}:${RUN_USER}" "${INSTALL_DIR}/data"
 
 # ---------- 4. 数据库初始化（幂等，失败不阻断） ----------
 DB_HOST="${MYSQL_ADDR%%:*}"; DB_PORT="${MYSQL_ADDR##*:}"
