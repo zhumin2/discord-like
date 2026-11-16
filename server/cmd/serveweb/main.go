@@ -43,17 +43,21 @@ func contentTypeFor(p string) string {
 
 // ---- 缓存策略 ----
 
-// cacheControl 按路径返回 Cache-Control；指纹资源长缓存，入口/清单不缓存。
+// cacheControl 按路径返回 Cache-Control。
+// 注意：Flutter Web 构建产物的文件名**不含内容哈希**（main.dart.js、字体、canvaskit 都是稳定名），
+// 因此绝不能长缓存——否则升级后浏览器继续用旧 bundle/旧图标字体（v1.1 曾因此丢图标与旧代码）。
+//   - 入口与 bundle：no-cache（每次协商，304 很便宜，且有 gzip）
+//   - 其余资源：1 小时（同一构建内可复用，升级后最多 1 小时自然过期）
 func cacheControl(p string) string {
+	switch p {
+	case "/", "/index.html", "/flutter_bootstrap.js", "/flutter_service_worker.js",
+		"/main.dart.js", "/flutter.js", "/version.json", "/manifest.json", "/favicon.png":
+		return "no-cache"
+	}
 	if strings.HasPrefix(p, "/assets/") ||
 		strings.HasPrefix(p, "/canvaskit/") ||
 		strings.HasPrefix(p, "/icons/") {
-		return "public, max-age=31536000, immutable"
-	}
-	switch p {
-	case "/index.html", "/", "/flutter_bootstrap.js", "/flutter_service_worker.js",
-		"/version.json", "/manifest.json", "/favicon.png":
-		return "no-cache"
+		return "public, max-age=3600"
 	}
 	return ""
 }
