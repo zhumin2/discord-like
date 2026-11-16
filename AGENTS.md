@@ -1,149 +1,334 @@
 # AGENTS.md — Chord 项目交接文档
 
-> 本文档面向接手本项目的 AI agent / 开发者，记录项目全貌、历史决策、环境事实与已知坑。
-> 最后更新：2026-11-15
+> 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
+> 最后更新：2026-11-16（对应发布版本 **v1.1.0**，已上线）
+>
+> 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
+> ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
+> ｜ [部署说明 deploy/部署说明.md](deploy/部署说明.md)（发布包内还有一份）
 
-> 📌 **产品与规划文档**：[docs/PRD.md](docs/PRD.md)（产品规格说明书，含当前版本功能规格）
-> 与 [docs/ROADMAP.md](docs/ROADMAP.md)（版本规划与开发计划）——规划/排期以此两份为准。
+---
 
 ## 一、项目是什么
 
-**Chord** —— 一个模仿 Discord 的实时聊天产品，已完成可运行 MVP：
+**Chord** —— 模仿 Discord 的实时聊天产品，可自托管，中文优先。当前状态：**v1.1.0 已上线运行**。
 
-| 端 | 形态 | 入口 |
+| 端 | 形态 | 入口 / 获取方式 |
 |---|---|---|
-| Web / PWA | Flutter Web，浏览器访问，可加主屏 | `http://127.0.0.1:3000` |
-| **Windows 桌面客户端** | 原生窗口 1200×800 | `app\Chord聊天.exe`（启动器：`启动聊天客户端.bat`） |
-| **服务管理控制台（GUI）** | Laragon 风格托盘程序 560×640 | `console\Chord控制台.exe`（启动器：`启动控制台.bat`） |
+| Web / PWA | Flutter Web（CanvasKit 渲染器） | http://129.226.159.168:3000 |
+| Windows 桌面 | 原生窗口 1200×800，托盘最小化 | Release `chord-windows-x64.zip`（exe+dll+data 三件套同目录） |
+| Android | APK（arm64 / armv7 / universal） | Release 附件（debug 签名，可直接安装） |
+| 服务管理控制台 | Laragon 风格托盘程序 560×640 | 本机构建 `gui/`（仅 Windows，本地部署用） |
 | 命令行管理 | Git Bash 脚本 | `chord.sh start/stop/restart/status/logs` |
 
-功能：注册登录(JWT)、服务器/邀请码、频道分组、实时消息(WS)、编辑删除、Markdown-lite 渲染、@提及、表情回应、私信 DM、在线状态、typing 提示、未读/提及数、响应式(PC 四栏/手机单栏+抽屉)、PWA。
+**已实现功能**：注册登录(JWT)、服务器/邀请码、频道分组、实时消息(WS)、编辑删除、Markdown-lite、
+@提及、表情回应、私信 DM、在线状态、typing 提示、未读/提及数、响应式(四栏/单栏+抽屉)、PWA、
+**图片/文件上传（v1.1）**、**限流（v1.1）**、**gzip 压缩（v1.1）**。
 
-**演示账号**：alice / bob / carol，密码均为 `123456`；演示服务器邀请码 `demo2024`。
+**演示账号**：alice / bob / carol，密码均 `123456`；演示服务器邀请码 `demo2024`。
+
+---
 
 ## 二、技术栈与目录结构
 
-- **后端** Go 1.27：Gin + gorilla/websocket + GORM(MySQL) + go-redis
-- **前端** Flutter 3.50 stable（Web + Windows 桌面同一套代码），Riverpod 3.x 状态管理
-- **存储** MySQL 8（持久化）+ Redis（在线状态/presence、事件扇出/pub-sub，**可选**）
+- **后端** Go 1.27.3：Gin + gorilla/websocket + GORM(MySQL) + go-redis
+- **前端** Flutter 3.50.0 stable（Web + Windows + Android 同一套代码），Riverpod 3.x
+- **存储** MySQL 8（持久化）+ Redis（presence/事件扇出，**可选**，连不上自动降级单机）
 
 ```
 ├── server/                    Go 后端
-│   ├── cmd/server/            主服务（REST + WS 网关，编译产物 chord-server.exe）
-│   ├── cmd/serveweb/          Flutter Web 静态托管（serveweb.exe，含 wasm MIME + SPA 回退）
-│   ├── cmd/fakeredis/         Redis 协议兼容开发服务器（miniredis + TCP 透传固定 6379）
-│   ├── cmd/redisprobe/        Redis 状态探针（presence 键 / -sub 订阅验证）
-│   ├── internal/
-│   │   ├── config/            .env + 默认值（REDIS_ADDR 默认 127.0.0.1:6379，连不上自动降级）
-│   │   ├── models/            GORM 模型（UUIDv7 主键 = 消息分页游标）
-│   │   ├── auth/              JWT + bcrypt
-│   │   ├── handlers/          REST（auth/guild/message/dm 四组）
-│   │   ├── ws/                WebSocket Hub：连接管理、事件路由、presence、typing
-│   │   ├── bus/               事件总线抽象：MemoryBus（单实例）/ redisBus（多实例 pub/sub）
-│   │   └── db/                连接迁移 + 演示数据 seed
-│   ├── chord-server.exe       ⚠️ 预编译产物（GUI/chord.sh 优先使用）
-│   └── .data/jwt_secret       ⚠️ JWT 密钥（绝不入库/上传）
-├── client/                    Flutter 聊天应用（Web + Windows）
-│   ├── lib/state/app_state.dart   核心：Riverpod ChatNotifier（REST+WS→统一状态）
-│   ├── lib/api_client.dart        REST 客户端
+│   ├── cmd/server/            REST + WS 网关（产物 chord-server）
+│   ├── cmd/serveweb/          Flutter Web 静态托管（gzip + SPA 回退 + wasm MIME + 缓存策略）
+│   ├── cmd/fakeredis/         Redis 协议兼容开发服务器（miniredis + TCP 透传 6379）
+│   ├── cmd/redisprobe/        Redis/presence 状态探针
+│   └── internal/
+│       ├── config/            .env + 默认值（含 UPLOAD_DIR）
+│       ├── models/            GORM 模型（UUIDv7 主键 = 消息分页游标）
+│       ├── auth/              JWT + bcrypt
+│       ├── handlers/          REST（auth/guild/message/dm/router + **ratelimit.go + upload_h.go**）
+│       ├── ws/                WebSocket Hub：连接、事件路由、presence、typing
+│       ├── bus/               事件总线：MemoryBus / redisBus
+│       └── db/                迁移 + 演示数据 seed
+├── client/                    Flutter 聊天应用（web / windows / android 三平台）
+│   ├── lib/state/app_state.dart   Riverpod ChatNotifier（REST+WS→统一状态）
+│   ├── lib/api_client.dart        REST 客户端（含 upload 多部分上传）
 │   ├── lib/gateway.dart           WS 网关（心跳 25s + 指数退避重连）
-│   ├── lib/storage.dart           条件导入 KV 存储（桌面=JSON 文件 / Web=localStorage）
-│   ├── lib/widgets|screens/       UI（消息/面板/对话框/响应式外壳）
-│   ├── assets/fonts/              内置 Noto Sans SC（中文必需，见"坑"）
-│   └── windows/runner/            桌面壳（托盘最小化在 tray_manager.cpp）
+│   ├── lib/storage.dart           条件导入 KV（桌面 JSON 文件 / Web localStorage / 移动）
+│   ├── lib/file_picker*.dart      **v1.1 文件选择（条件导入，零插件）**
+│   ├── lib/widgets/               composer（含 📎）/ rich_text（含图片渲染）/ message_tile …
+│   ├── lib/screens/               chat_area / home_shell / login_screen
+│   ├── android/                   **v1.1 补生成**（MainActivity.kt 含 SAF 文件选择通道 chord/file）
+│   └── windows/runner/            flutter_window.cpp **含 GetOpenFileNameW 通道 chord/file**
 ├── gui/                       服务管理控制台（独立 Flutter Windows 工程）
-│   └── windows/runner/        托盘/关闭拦截 = 原生 Win32（tray_manager.cpp）
-├── console/                   控制台部署产物（Chord控制台.exe）
-├── app/                       桌面客户端部署产物（Chord聊天.exe）
-├── scripts/guitest/           GUI 黑盒走查（playwright-core + 无头 Edge，token 预注入）
-├── chord.sh / chord.bat       服务管理（start/stop/restart/status/logs [api|web|mysql]）
-├── start-dev.sh / stop-dev.sh chord.sh 的 start/stop 快捷方式
-├── 启动控制台.bat / 启动聊天客户端.bat
-└── docker-compose.yml         mysql + redis（有 Docker 的环境用）
+├── deploy/                    **部署脚本（入库版本）**
+│   ├── install.sh             一键安装（幂等；MYSQL_PASS 环境变量传密码；restart 而非 enable --now）
+│   ├── update.sh              服务器一键更新（web / full 两模式，从 GitHub Release 拉包）
+│   ├── caddy/Caddyfile        TLS 反代模板（等域名启用）
+│   └── 部署说明.md
+├── docs/                      PRD.md（产品规格）/ ROADMAP.md（路线图）/ RELEASE-v1.1.0.md（用户向说明）
+├── scripts/guitest/           GUI 黑盒走查（playwright-core + 无头 Edge）
+├── chord.sh / chord.bat       本地服务管理
+├── docker-compose.yml         mysql + redis（有 Docker 的环境用）
+└── （不进仓库）dist/          本地构建产物：客户端安装包（Release 用）
+    （不进仓库）runtimes/      便携工具链 + gh.exe
 ```
+
+---
 
 ## 三、架构要点（为什么这样设计）
 
-1. **消息 ID 用 UUIDv7**（时间有序）——历史消息分页直接 `WHERE id < cursor`，无需额外排序列。
-2. **WS 事件与 REST 分离**：写操作走 REST（可靠、可校验），结果以 WS 事件广播给所有连接（含作者本人，客户端按消息 ID 去重）。
-3. **事件总线抽象 `bus.Bus`**：`MemoryBus`（单实例，进程内回调）与 `redisBus`（PUBLISH/SUBSCRIBE chord:events）同接口；API 默认连 127.0.0.1:6379，**连不上自动降级**。多实例部署时事件跨实例扇出就靠它。
-4. **presence 键**：`presence:<uid>`（TTL 60s），心跳续期（`Hub.SetActivity`）；成员列表在线状态 = 本地连接表优先、Redis 键兜底（跨实例感知）。
-5. **前端存储抽象 `storage.dart`**：条件导入——桌面 JSON 文件（%APPDATA%\Chord\storage.json）/ Web localStorage（自动迁移旧 `flutter.<key>` 键）。**刻意不依赖任何 Flutter 平台插件**，否则 Windows 构建需要开发者模式（符号链接限制）。
-6. **服务管理三件套行为一致**：GUI / chord.sh / 手动命令都优先使用预编译 exe（chord-server.exe / serveweb.exe），缺失时自动编译（GUI 用合并系统环境变量的 Process.run）。
-7. **控制台托盘**：关闭窗口=隐藏到托盘（原生 Win32 `tray_manager.cpp`，WM_CLOSE 拦截），只有托盘菜单「退出」真正退出，且不停服务。
+1. **消息 ID 用 UUIDv7**（时间有序）——分页直接 `WHERE id < cursor`，无需额外排序列。
+2. **WS 事件与 REST 分离**：写操作走 REST（可靠、可校验），结果以 WS 事件广播（含作者本人，客户端按 ID 去重）。
+3. **事件总线抽象 `bus.Bus`**：MemoryBus（单进程）/ redisBus（PUBLISH-SUBSCRIBE `chord:events`）同接口，Redis 缺失自动降级。
+4. **presence**：键 `presence:<uid>` TTL 60s，心跳续期；成员在线状态 = 本地连接表优先、Redis 兜底。
+5. **前端存储抽象**：条件导入——桌面 JSON 文件（`%APPDATA%\Chord\storage.json`）/ Web localStorage。
+   **刻意不依赖任何 Flutter 平台插件**（否则 Windows 构建需要开发者模式）。文件选择同理：
+   Web `<input type=file>` / Windows 原生 C++ / Android SAF，统一走 `chord/file` 调用约定。
+6. **服务管理三件套一致**：GUI / chord.sh / 手动命令都优先用预编译 exe，缺失时自动编译。
+7. **默认服务器地址推导**：Web 从 `Uri.base` 推导（同主机:8081）；桌面/移动用构建参数
+   `--dart-define=CHORD_DEFAULT_BASE=`；登录页均可手改并持久化。
+8. **v1.1 上传**：`POST /api/upload`（multipart ≤10MB + 扩展名白名单）落盘 `{UPLOAD_DIR}/yyyyMM/<uuid><ext>`；
+   `GET /uploads/*` 公开读取（UUID 名不可猜测、拒绝 `..`/`\`、成功长缓存、**错误 no-store**）。
+9. **v1.1 限流**：内存固定窗口，双维度——匿名接口按 IP（注册/登录 10 次/分）、登录后按用户
+   （发消息 20 条/10s、上传 30 次/分），超限 429。多实例部署时需换 Redis 实现（未做）。
 
-## 四、运行环境事实（本机专属）
+---
 
-- **运行时全部便携化**，无管理员权限：`F:\dev\runtimes\`（flutter/、mysql/ 含 data 目录、downloads/）。MySQL root 无密码，端口 3306，库名 chord。
-- **端口**：API 8081、Web 3000、MySQL 3306、Redis(开发) 6379。⚠️ 有一个**无法 kill 的遗留 8080 进程**（旧版 bug 服务，沙箱保护），重启电脑才释放——8081 端口由此而来。
-- **国内网络**：GitHub HTTPS 被墙，**SSH 22 端口可用**（密钥 `~/.ssh/id_ed25519_github`，账号 `zhumin2`，~/.ssh/config 已配 443 通道）。Go/Flutter/pub 依赖一律走镜像：`GOPROXY=https://goproxy.cn,direct`、`PUB_HOSTED_URL=https://pub.flutter-io.cn`、`FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn`。
-- **ZCode 沙箱**：从沙箱内启动的跨会话进程可能无法被 taskkill 终止（拒绝访问）；GUI/chord.bat 由用户双击启动的进程完全可控。
-- MySQL/API/Redis 数据特点：presence/typing 是临时数据（fakeredis 重启即清）；唯一需要持久化的秘密是 `server/.data/jwt_secret`。
+## 四、项目历史（完整时间线）
+
+> 均按真实发生顺序记录，含发现的问题与修复提交，便于接手者理解"为什么代码长这样"。
+
+### 阶段 0：MVP（2026-11-15 之前，另一会话完成）
+原始需求：做一个像 Discord 的聊天软件。产出 Web(WASM/CanvasKit) + Windows 桌面 + 服务管理控制台 GUI；
+建立本地便携运行时 `F:\dev\runtimes\`（Flutter/MySQL），后端 Go + MySQL + 可选 Redis；
+写下本文件的前 10 条踩坑；讨论过中文名候选（**尚未定名，见第十节**）。
+
+### 阶段 1：代码托管与首次公网部署（2026-11-15 晚）
+1. 仓库 clone 到 `D:\code\chrod\discord-like`；确认本机实际环境与原文不符（无 `F:\dev\runtimes`，
+   Go/Flutter 均未安装），遂下载便携工具链：**Go 1.27.3 + Flutter 3.50.0**（走国内镜像），
+   放到 `D:\code\chrod\runtimes\`。
+2. 用户要求部署到**新加坡腾讯云 129.226.159.168**（MySQL root，密码由项目负责人保管，本机 127.0.0.1:3306，
+   Redis 无密码 6379 本机）。本机无 SSH 凭据 → 改为**用户手动上传 + 一键脚本**模式。
+3. 交叉编译 Linux 三件套（`chord-server`/`serveweb`/`redisprobe`，CGO_ENABLED=0 静态链接）。
+4. 首次 `flutter build web --wasm` 构建——**后来发现这是错的**（见坑 16）。
+5. 编写 `install.sh`（密码移除内嵌，改 `MYSQL_PASS` 环境变量）与部署说明，打包 `chord-deploy.tar.gz`。
+6. 用户上传安装 → 公网验证：API health 200、alice 登录成功、静态资源 200。
+7. **发现 wasm 构建在线上直接白屏**：`crossOriginIsolated=false`，skwasm 引擎永不启动。改回
+   `flutter build web --release`（CanvasKit），本地浏览器验证通过后重新打包。
+
+### 阶段 2：GitHub 化与 v1.0.0 发布（2026-11-15 深夜）
+1. 生成 SSH 密钥 `~/.ssh/id_ed25519_github`（用户加到 zhumin2 账号），`~/.ssh/config` 指到
+   `ssh.github.com:443`（国内 HTTPS 被墙、22 有时被断）；远程地址切 SSH。
+2. 提交 `deploy/` 三脚本 + app_state 默认地址改动；打 tag **v1.0.0** 并推送。
+3. 用 **OAuth 设备码流程**认证 gh（便携版 `runtimes/bin/gh.exe`），创建 Release v1.0.0，上传
+   服务器包；随后发现 **GitHub 附件名不支持中文**（"聊天"被吞），改用 ASCII 名重传。
+4. 补 Android 平台（原仓库只有 web/windows）：`flutter create --platforms=android`，
+   应用名 `Chord聊天`，并修复根 `.gitignore` 的 `app/` 误伤 `client/android/app/`（改锚定 `/app/`）。
+5. 构建 Windows 客户端 + 3 个 APK，全部带 `--dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081`；
+   用 `grep -a` 校验 AOT 快照内确实包含该地址。上传 Release。
+
+### 阶段 3：产品文档（2026-11-15）
+编写 `docs/PRD.md`（定位/用户/功能规格/非功能/度量/风险）与 `docs/ROADMAP.md`
+（v1.1 安全体验 → v1.2 社群成长 → v1.3 语音 → v2.0 生态，含工作量、验收、甘特、DoD），
+并在本文件加文档索引。
+
+### 阶段 4：v1.1 开发（2026-11-16 凌晨）
+1. **A2 gzip**：重写 `serveweb`——gzip 压缩（bundle 2.9MB→0.9MB）+ 缓存头。
+2. **A3 限流**：`internal/handlers/ratelimit.go`，固定窗口、IP/用户双维度，接入注册/登录/发消息/上传。
+3. **B 上传**：`upload_h.go`（上传 + 读取 + 白名单 + 10MB 上限）；客户端三端 📎 按钮
+   （`file_picker.dart` 条件导入 + `ApiClient.upload` + `RichTextSpan` 图片渲染）。
+4. **C1 测试**：`ratelimit_test.go`、`upload_test.go`，8 个用例（含并发精确性、路径穿越攻击）。
+5. **A1 TLS**：`deploy/caddy/Caddyfile` 模板（域名就绪即可启用）。
+6. 提交 `930b785`、tag **v1.1.0** 并推送；Release v1.1.0 上传 6 个附件。
+
+### 阶段 5：v1.1 上线与 5 个连环 Bug（2026-11-16 上午）
+上线后发现并依次修复（每个都记进了第五节）：
+
+| # | 现象 | 根因 | 修复提交 |
+|---|---|---|---|
+| 1 | 线上页面**永久白屏** | gzip 响应**缺 `Content-Encoding` 头**，浏览器把压缩字节当 JS 执行 | `8350007` |
+| 2 | 所有图片 **400** | gin 通配参数自带前导 `/`，Linux 上 `filepath.IsAbs` 为真被防穿越误杀 | `7ba4bce` |
+| 3 | 线上仍是 v1.0、无 📎 | **web 构建从未成功**（类型名错+缺导入+构建在错目录、`&&` 掩盖失败） | `4201e83` |
+| 4 | 修复"部署成功"却不生效 | `systemctl enable --now` 对已运行服务**不重启** | `71fc49a` |
+| 5 | 📎 存在但**图标空白** | 图标字体被 `immutable` 缓存一年（产物名无内容哈希） | `548eaad` |
+
+伴随修复：`bf9bd0b`（install.sh 未安装 update.sh 到 /opt/chord）、`bf9fa95`（/uploads 错误响应 no-store，
+避免坏响应被缓存）。最终线上验证全绿：gzip 头+体积、入口 no-cache、字体 1h、限流 429、
+上传 200/415、图片消息内联渲染、📎 图标可见。
+
+### 阶段 6：文档收尾（2026-11-16）
+回写 ROADMAP 状态（v1.1 已发布+遗留）、踩坑补到 15 条（`ee9b0af`）、
+新增面向用户的 `docs/RELEASE-v1.1.0.md` 并同步到 Release 页面（`562b2ab`）。
+
+---
 
 ## 五、踩坑记录（重要！避免重蹈）
 
-1. **GORM 只自动填充 `CreatedAt/UpdatedAt`**；其他 time.Time 字段（如 `GuildMember.JoinedAt`）零值 `0001-01-01` 会被 MySQL 严格模式拒绝 → 事务静默回滚。新增模型必须显式赋值（曾导致"创建服务器 500"）。
-2. **Flutter Windows：宽屏布局缺 `Material` 祖先** → 所有 Text 渲染为红字+黄双下划线、ExpansionTile 画成灰块（是框架调试样式，不是业务 bug）。HomeShell 宽屏分支必须包 `Material`。
-3. **中文显示方框**：CanvasKit 默认从 fonts.gstatic.com 拉字体（被墙）→ 必须内置 NotoSansSC（已在 pubspec fonts 注册，FontManifest 兜底即生效）。
-4. **GUI 的 C++ 源文件含中文注释**：必须 UTF-8 BOM + runner CMakeLists 加 `/utf-8`（默认 /WX 下 GBK 代码页触发 C4819 编译失败）。
-5. **Process.run 的 `environment` 参数是整体替换**：必须 `{...Platform.environment, ...extra}` 合并，否则 go build/flutter build 缺系统变量直接失败。
-6. **`flutter create` 后同端口僵尸进程**：TaskStop 杀不死 dartvm 子进程，导致新构建"看似部署实则旧代码在服务"。改端口/杀进程（`netstat -ano` + `taskkill /F /PID`）后复测。
-7. **Flutter Web + 无头浏览器自动化**：canvas 渲染 DOM 快照为空，需先 `dispatchEvent(click)` 激活 `flt-semantics-placeholder`；截图偶发超时，改视口 ±1px 可解；Prepared token 注入键为 `flutter.<key>` 且值需 `JSON.stringify`（SharedPreferences 语义）。
-8. **shared_preferences 插件使 Windows 构建需要开发者模式**（符号链接）→ 已移除并自研 storage 抽象。**不要给 client/gui 加任何平台插件**，托盘/窗口行为全走原生 C++。
-9. **miniredis 只支持随机端口**：fakeredis 用 TCP 字节透传（net.Listen 6379 → Dial miniredis）固定端口，Redis 协议是纯流，透传无损。
-10. **Windows 控制台 GBK**：含中文的 bash/python 脚本输出需 `PYTHONIOENCODING`/`-X utf8`；C++/SQL 交互避免在命令行内联中文字面量（会被转码污染）。用 curl 发中文 JSON 到 API 也会被 GBK 污染成乱码——验证中文内容一律用 `python -X utf8` + `json.dumps(ensure_ascii=False).encode('utf-8')`。
-11. **后台构建必须在正确目录**：`flutter build web` 在非项目目录执行会 `Error: No pubspec.yaml file found` 但退出码可能被 `&&` 链掩盖，产物目录残留旧文件，导致发布包静默带旧代码（v1.1 曾因此把 v1.0 的 web 发到线上）。**发布前必须校验产物含新代码特征**（如 python 搜 bundle 中的中文转义序列、`/api/upload` 等标记，或对比文件大小/时间戳）。
-12. **serveweb gzip 必须声明 Content-Encoding**：只压缩 body 不设头 → 浏览器把 gzip 字节当明文 JS 执行，`SyntaxError` 后静默白屏（无显式报错）。验证压缩必须查响应头 + 浏览器真实加载，curl 只看 `size_download` 会漏。用 gzip 包装 `http.FileServer` 时要在 `WriteHeader` 里删 `Content-Length`、按状态码设 `Content-Encoding`。
-13. **gin 通配参数自带前导斜杠**：`c.Param("filepath")` 得到 `/202611/x.png`，在 Linux 上 `filepath.IsAbs()` 为 true（Windows 为 false）→ 用 `IsAbs` 做路径校验会造成"本地测试通过、线上 400"。正确做法：`strings.TrimPrefix(rel, "/")` 后只拒绝 `..` 与 `\`。
-14. **install.sh 用 restart 而非 `enable --now`**：对已运行的服务，`systemctl enable --now` 不会重启，新二进制落盘但不生效（曾导致 gzip 修复"部署成功"却未生效）。
-15. **Flutter Web 产物绝不能长缓存**：`main.dart.js`、`assets/fonts/*.otf`、`canvaskit/*` 的 URL **都不含内容哈希**。给它们设 `immutable, max-age=31536000` 会导致升级后浏览器永远用旧 bundle / 旧 tree-shaken 图标字体（v1.1 曾出现"新按钮存在但图标空白"——旧字体里没那个字形）。serveweb 现策略：入口与 bundle `no-cache`，`/assets//canvaskit//icons/` `max-age=3600`。排查此类问题的关键信号：**语义树里有控件、但画不出来** → 先怀疑字体缓存。
+1. **GORM 只自动填充 `CreatedAt/UpdatedAt`**；其他 time.Time 字段（如 `GuildMember.JoinedAt`）零值
+   `0001-01-01` 会被 MySQL 严格模式拒绝 → 事务静默回滚。新增模型必须显式赋值。
+2. **Flutter Windows 宽屏布局缺 `Material` 祖先** → Text 红字+黄双下划线、ExpansionTile 灰块（框架调试样式）。
+   HomeShell 宽屏分支必须包 `Material`。
+3. **中文显示方框**：CanvasKit 默认从 fonts.gstatic.com 拉字体（被墙）→ 必须内置 NotoSansSC（已注册）。
+4. **GUI 的 C++ 源文件含中文注释**：必须 UTF-8 BOM + runner CMakeLists 加 `/utf-8`，否则 /WX 下 C4819。
+5. **`Process.run` 的 `environment` 是整体替换**：必须 `{...Platform.environment, ...extra}` 合并。
+6. **`flutter create` 后同端口僵尸进程**：TaskStop 杀不死 dartvm 子进程，新构建"看似部署实则旧代码在服务"。
+7. **Flutter Web + 无头浏览器自动化**：canvas 渲染 DOM 快照为空，需先对 `flt-semantics-placeholder`
+   `dispatchEvent(click)`；Playwright `fill()` 对 Flutter 输入框不生效，用界面内按钮或 `cua.type`。
+8. **shared_preferences 插件使 Windows 构建需要开发者模式** → 已移除并自研 storage。
+   **不要给 client/gui 加任何平台插件**，托盘/窗口/文件选择全走原生 C++ / Kotlin / Web API。
+9. **miniredis 只支持随机端口**：fakeredis 用 TCP 字节透传固定 6379（协议纯流，无损）。
+10. **Windows 控制台 GBK**：bash/python 输出中文需 `-X utf8`；**用 curl 发中文 JSON 到 API 会被 GBK 污染**
+    （本项目曾因此产生乱码测试消息）→ 一律 `python -X utf8` + `json.dumps(ensure_ascii=False).encode('utf-8')`。
+11. **后台构建必须在正确目录**：`flutter build web` 在无 pubspec 目录执行会失败，但 `&&` 链可能掩盖退出码，
+    产物目录残留旧文件 → 发布包静默带旧代码。**发布前必须校验产物含新代码特征**
+    （dart2js 把中文转成 `\uXXXX`，用 python 搜 `\u53d1\u9001\u6587\u4ef6`、`/api/upload`；AOT 里中文是 UTF-16LE）。
+12. **serveweb gzip 必须声明 `Content-Encoding`**：只压缩 body 不设头 → 浏览器把 gzip 当明文 JS → 静默白屏。
+    验证必须查响应头 + `curl --compressed` 解压 + 浏览器真实加载，只看 `size_download` 会误判。
+13. **gin 通配参数自带前导 `/`**：`c.Param("filepath")` 得到 `/202611/x.png`，Linux 上 `filepath.IsAbs` 为 true
+    （Windows 为 false）→ 用 IsAbs 校验会"本地过、线上 400"。剥前缀后只拒 `..` 与 `\`。
+14. **install.sh 用 restart 而非 `enable --now`**：对已运行服务 `systemctl enable --now` 不重启，新二进制不生效。
+15. **Flutter Web 产物绝不能长缓存**：`main.dart.js`、`assets/fonts/*`、`canvaskit/*` 的 URL 都**不含内容哈希**。
+    设 `immutable` 一年会导致升级后继续用旧 bundle / 旧 tree-shaken 图标字体（曾致"按钮存在但图标空白"）。
+    现策略：入口与 bundle `no-cache`，`/assets/ /canvaskit/ /icons/` `max-age=3600`。
+    **排查信号：语义树里有控件、但截图空白 → 先怀疑字体缓存**。
+16. **`flutter build web --wasm` 部署到无 COOP/COEP 头的服务器会白屏**（`crossOriginIsolated=false`，
+    skwasm 卡死、`flutter-view` 永不创建）。本项目必须用普通 `--release`（CanvasKit/dart2js）；
+    serveweb 的 wasm MIME 是为 canvaskit.wasm 服务的，与 dart2wasm 无关。
+17. **限流测试会吃掉自己 IP 的配额**（登录 10 次/分）：测完需等 65 秒再登录，否则拿到 429。
 
-## 六、验证方式
+---
 
-- **后端冒烟**：`server/cmd/redisprobe`（presence 键）、curl `/api/health`
-- **GUI 黑盒**：`scripts/guitest/walk.mjs` / `final-walk.mjs`（双账号实时消息、桌面/移动双视口、截图到 shots/）
-- **全链路**：双浏览器窗口登录不同演示账号互发消息；移动端 375×812 视口 + 抽屉
-- 运行 GUI 测试前先 `cd scripts/guitest && npm i`（playwright-core + 系统 Edge）
+## 六、线上运行事实（服务器 129.226.159.168）
 
-## 七、已知限制 / 未做事项（按价值排序的下一步）
+- 云厂商：腾讯云，OS opencloudos。**本机没有该服务器 SSH 凭据，所有操作由用户手动执行**（用户复制命令）。
+- MySQL 8：用户 `root`（**密码不写入仓库，向负责人索取**），`127.0.0.1:3306`，库 `chord`。Redis：`127.0.0.1:6379` 无密码（可选）。
+- 端口：**API 8081、Web 3000**（腾讯云安全组已放行）。无 80/443（TLS 待域名）。
+- 安装布局 `/opt/chord/`：
+  ```
+  server/chord-server      后端二进制
+  server/.env              配置（600，含 DB_DSN / UPLOAD_DIR=/opt/chord/data/uploads）
+  server/.data/jwt_secret  JWT 密钥（600，唯一需备份的秘密）
+  web/serveweb             静态托管二进制
+  web/htdocs/              Flutter Web 产物
+  data/uploads/            用户上传文件（yyyyMM/uuid.ext）
+  update.sh                一键更新脚本（web|full）
+  ```
+- systemd：`chord-server`、`chord-web`，运行用户 `chord`；日志 `journalctl -u chord-server -f`。
+- 运维命令：`sudo bash /opt/chord/update.sh web`（只换前端，最常用）、
+  `sudo MYSQL_PASS='...' bash /opt/chord/update.sh full`（全量重装，用于二进制/配置变更）。
+- 数据备份：只需 `mysqldump chord` + `/opt/chord/data/uploads/` + `server/.data/jwt_secret`。
 
-1. **语音频道**（WebRTC mesh）——已留 ws/ 与频道模型扩展点
-2. **文件/图片上传**——消息表 content 为纯文本，需加 attachment 表与静态服务
-3. **角色权限体系**——目前仅 owner/member 两级；权限点已在 owner 判断处集中
-4. **好友系统 / 消息搜索 / 推送通知**（Web Push / WNS）
-5. **生产部署**：真 Redis（Docker/WSL/Memurai）+ 多实例 + Nginx TLS 反代（WS 走 wss）
-6. **测试**：目前无单元测试，验证靠 scripts/guitest 黑盒走查；可补 Go httptest 与 widget 测试
-7. 控制台 GUI 可加：MySQL/API 的资源占用显示、开机自启、日志级别切换
+---
 
-## 八、一键恢复环境（新机器/重置后）
+## 七、本机开发环境（Windows 11，便携化）
+
+| 组件 | 路径 | 说明 |
+|---|---|---|
+| Go 1.27.3 | `D:\code\chrod\runtimes\go\bin\go.exe` | GOPROXY=`https://mirrors.aliyun.com/goproxy/,direct`（goproxy.cn 常超时） |
+| Flutter 3.50.0 | `D:\code\chrod\runtimes\flutter\bin\flutter.bat` | `PUB_HOSTED_URL=https://pub.flutter-io.cn`、`FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn` |
+| Android SDK | `D:\Apps\android-sdk`（API 36） | JDK 17 Temurin；licenses 已接受 |
+| VS Build Tools 2022 | `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools` | Windows 桌面构建 |
+| gh CLI 2.104 | `D:\code\chrod\runtimes\bin\gh.exe` | 发 Release 用（见第八节） |
+| 工作区 | `D:\code\chrod\`（仓库 `discord-like/`，产物 `dist/`，脚本 `deploy-scripts/`） | |
+
+> 注意：历史文档中的 `F:\dev\runtimes\` 在本机**不存在**，实际工具链路径以上表为准。
+
+---
+
+## 八、构建与发布手册
+
+### 8.1 构建
 
 ```bash
-# 1. 运行时：Flutter 3.50 (含 Windows desktop) + MySQL 8 便携版放 F:\dev\runtimes\
-# 2. 数据库：chord.sh start mysql 会自动建库；空库自动 seed 演示数据（SEED_DEMO=true）
-# 3. 全套启动：bash chord.sh start all   （MySQL → fakeredis → API → Web）
-# 4. 桌面端/控制台：flutter build windows --release（client/ 与 gui/ 各一次）
-# 5. 验证：bash chord.sh status && cd server && go run ./cmd/redisprobe
+# 后端（Linux 静态二进制，供服务器）
+cd server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o <out>/chord-server ./cmd/server
+# 同样产出 serveweb / redisprobe（cmd/serveweb、cmd/redisprobe）
+go vet ./... && go test ./internal/handlers/     # 测试
+
+# Web（必须 cd client/；默认地址按需改）
+cd client && flutter build web --release --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
+# 校验产物含新代码（关键！）：
+python -X utf8 -c "d=open('build/web/main.dart.js',encoding='utf-8',errors='ignore').read(); print(d.count(r'\u53d1\u9001\u6587\u4ef6'), d.count('/api/upload'))"
+
+# Windows 客户端（产物 build/windows/x64/runner/Release → 改名 exe 为 Chord聊天.exe，三件套同目录打 zip）
+cd client && flutter build windows --release --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
+
+# Android（推荐 arm64；另两个 ABI 用 --split-per-abi 自动产出）
+cd client && flutter build apk --release --split-per-abi --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
 ```
 
-## 九、中文名候选（待定，2026-11-15 讨论未决）
+### 8.2 打包服务器部署包
 
-当前对外名仍是 **Chord**。中文名候选及利弊分析（选定后落地位置：桌面窗口标题
-`client/windows/runner/main.cpp`、托盘 `gui/windows/runner/tray_manager.cpp`、Web 标题
-`client/web/index.html`+`manifest.json`、登录页、README）：
+```bash
+# 包目录结构（package/）：chord-server serveweb redisprobe install.sh update.sh 部署说明.md web/
+tar czf chord-deploy.tar.gz package/            # 全量
+cd package && tar czf chord-web-update.tar.gz web/   # 仅前端
+```
 
-| 候选 | 亮点 | 短板 |
-|---|---|---|
-| 共鸣 | 音乐×情感双关，传播性最好 | 品类感缺失；重名/搜索极差；口语"你共鸣了吗"不顺；气质偏播客文艺 |
-| 同频 | 年轻化口语（"同频的人"），和弦物理本质 | 品类暗示中等；重名一般 |
-| 合鸣 | 琴瑟合鸣，雅致 | 书卷气重，口语弱 |
-| 声部 | 结构隐喻最妙（服务器=合唱、频道=声部） | 更适合做世界观文案而非名字 |
-| **弦外**（评价最高之一） | Chord=弦直译；"弦外之音"=聊天的言外之意；搜索唯一性极高；气质可硬可软 | 尚无重名调研反例 |
-| **开弦**（第二轮，游戏社群向最强） | 缝合"开黑/开麦"句式（"今晚开弦吗"），血缘直连，唯一性极高 | 新造词，需传播建立认知 |
-| **声浪** | 一群人的声音汇成浪=社区氛围隐喻，最有 Discord 味 | 有同名综艺，唯一性中上 |
-| **共鸣腔** | 声乐空腔=服务器房间，补齐"共鸣"缺品类感的短板（"开个共鸣腔"） | 三字稍长 |
-| **卡农** | 轮唱接龙=群聊复读机文化，音乐符号认知度最高 | 与聊天功能关联最弱 |
-| **泛音** | 每条消息激起泛音（回复/玩梗/二创），文艺技术流 | 偏抽象 |
-| **上弦** | 双关"上线了吗"，上膛的仪式感 | 语义偏冷 |
-| **音叉** | 对音=对暗号，短脆硬朗 | 品类感弱 |
+### 8.3 发布 Release（含设备码认证）
 
-场景推荐速查：游戏/开黑社群 → 开弦（声浪）；泛兴趣社区 → 共鸣腔（卡农）；文艺技术调性 → 弦外（泛音）。**尚未拍板。**
+1. 远端必须是 SSH：`git@github.com:zhumin2/discord-like.git`（本机 `~/.ssh/config` 已指 ssh.github.com:443）。
+2. 认证：`gh.exe` 存储校验要求 `read:org`，故**不要 `gh auth login`**；改用 OAuth 设备流拿 token：
+   ```bash
+   curl -s -X POST https://github.com/login/device/code -H "Accept: application/json" \
+        -d "client_id=178c6fc778ccc68e1d6a&scope=repo"      # → user_code，请用户在 15 分钟内输入
+   # 轮询：
+   POST https://github.com/login/oauth/access_token  grant_type=urn:ietf:params:oauth:grant-type:device_code
+   ```
+   把 token 写到文件后 `export GH_TOKEN=$(cat token.txt)` 使用；**用完立即删除 token 文件**。
+3. 上传附件：`gh release upload <tag> <files> --clobber`。
+   **附件名必须 ASCII**（中文会被吞）；上传后核对 `size`，并用 API 的 `digest` 与本地 `sha256sum` 比对。
+4. 发布说明用 `--notes-file`（用户向文案见 `docs/RELEASE-*.md`）。
+
+### 8.4 发布后验证清单（每次必做）
+
+```bash
+curl -s http://129.226.159.168:8081/api/health                       # {"status":"ok"}
+curl -s -D - -o /dev/null -H "Accept-Encoding: gzip" <web>/flutter_bootstrap.js | grep -i content-encoding
+curl -s --compressed -H "Accept-Encoding: gzip" <web>/main.dart.js | wc -c   # 与新构建解压尺寸一致
+curl -sI <web>/main.dart.js | grep -i cache-control                  # no-cache
+curl -sI <web>/assets/fonts/MaterialIcons-Regular.otf | grep -i cache-control  # max-age=3600
+# 限流（会耗掉本 IP 登录配额，测完等 65s）
+for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code} " -X POST <api>/api/auth/login -H "Content-Type: application/json" -d '{"username":"x","password":"y"}'; done
+# 上传：合法 png 200 且返回 /uploads/...；.exe 415；/uploads/不存在 404 + no-store
+# 浏览器（无头/自动化）：登录 → 语义树出现 button "发送文件" → 图片消息内联渲染
+```
+
+---
+
+## 九、验证方式
+
+- **后端冒烟**：`cmd/redisprobe`（presence 键）、`curl /api/health`、`go test ./internal/handlers/`
+- **GUI 黑盒**：`scripts/guitest/walk.mjs` / `final-walk.mjs`（双账号实时消息、双视口、截图）
+- **全链路**：浏览器登录不同演示账号互发消息；移动端 375×812 视口 + 抽屉
+- **无头浏览器**：先 `dispatchEvent(click)` 激活 `flt-semantics-placeholder`；`fill()` 对 Flutter 输入框无效
+- 跑 GUI 测试前 `cd scripts/guitest && npm i`（playwright-core + 系统 Edge）
+
+---
+
+## 十、已知限制 / 待办
+
+**v1.1 遗留**：TLS 待域名（`deploy/caddy/Caddyfile` 已就绪）；CDN 未接入；每日备份 cron 未配置；
+客户端图片未做上传前压缩；APK 为 debug 签名；Windows 无代码签名。
+
+**路线图**（详见 `docs/ROADMAP.md`）：
+1. **v1.2 社群成长**：角色权限体系（role 表 + 权限点 + UI）、消息搜索（MySQL ngram 全文索引）、
+   桌面/Web 通知、好友系统（可选）、Android 正式签名
+2. **v1.3 语音**：WebRTC mesh（先限 3 人，新加坡带宽有限），信令复用现有 WS Hub，TURN 用 coturn
+3. **v2.0**：Bot API、SFU、多实例（redisBus 已具备但未实测）、移动推送、应用市场分发
+
+**中文名候选（仍未拍板）**：共鸣 / 同频 / 合鸣 / 声部 / 弦外 / 开弦 / 声浪 / 共鸣腔 / 卡农 / 泛音 /
+上弦 / 音叉。落地位置：`client/windows/runner/main.cpp` 窗口标题、`gui/windows/runner/tray_manager.cpp`、
+`client/web/index.html` + `manifest.json`、登录页、README。
+
+---
+
+## 十一、接手建议（新 agent 从这里开始）
+
+1. 先读本文件第四节（历史）→ 再读 `docs/PRD.md` 与 `docs/ROADMAP.md` 了解规范与计划。
+2. 本地起服务自测（服务器上的东西别乱动，用户手动操作）：
+   `cd server && go run ./cmd/server`（需本地 MySQL；或连服务器 MySQL 改 DB_DSN），
+   `cd client && flutter run -d windows` 或 `flutter run -d chrome`。
+3. 改完代码先跑 `go vet ./... && go test ./...`；UI 改动用 `scripts/guitest` 走查。
+4. **发布前务必执行第 8.4 节清单**——v1.1 的 5 个 bug 全部是"部署了但没生效/没生效却以为生效"。
+5. 涉及部署变更时同步更新 `deploy/部署说明.md` 与本文件第五节。
