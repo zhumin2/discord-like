@@ -96,6 +96,7 @@
 12. **serveweb gzip 必须声明 Content-Encoding**：只压缩 body 不设头 → 浏览器把 gzip 字节当明文 JS 执行，`SyntaxError` 后静默白屏（无显式报错）。验证压缩必须查响应头 + 浏览器真实加载，curl 只看 `size_download` 会漏。用 gzip 包装 `http.FileServer` 时要在 `WriteHeader` 里删 `Content-Length`、按状态码设 `Content-Encoding`。
 13. **gin 通配参数自带前导斜杠**：`c.Param("filepath")` 得到 `/202611/x.png`，在 Linux 上 `filepath.IsAbs()` 为 true（Windows 为 false）→ 用 `IsAbs` 做路径校验会造成"本地测试通过、线上 400"。正确做法：`strings.TrimPrefix(rel, "/")` 后只拒绝 `..` 与 `\`。
 14. **install.sh 用 restart 而非 `enable --now`**：对已运行的服务，`systemctl enable --now` 不会重启，新二进制落盘但不生效（曾导致 gzip 修复"部署成功"却未生效）。
+15. **Flutter Web 产物绝不能长缓存**：`main.dart.js`、`assets/fonts/*.otf`、`canvaskit/*` 的 URL **都不含内容哈希**。给它们设 `immutable, max-age=31536000` 会导致升级后浏览器永远用旧 bundle / 旧 tree-shaken 图标字体（v1.1 曾出现"新按钮存在但图标空白"——旧字体里没那个字形）。serveweb 现策略：入口与 bundle `no-cache`，`/assets//canvaskit//icons/` `max-age=3600`。排查此类问题的关键信号：**语义树里有控件、但画不出来** → 先怀疑字体缓存。
 
 ## 六、验证方式
 
