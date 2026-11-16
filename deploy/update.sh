@@ -85,9 +85,10 @@ update_web() {
 
     # 5) 启动并探活（Type=simple 下 start 成功不代表进程真的活着）
     systemctl start chord-web || web_rollback
+    info "等待服务就绪…"
     local ok=0
-    for _ in $(seq 1 10); do
-        if curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:${WEB_PORT}/"; then ok=1; break; fi
+    for _ in $(seq 1 15); do
+        if curl -fs -o /dev/null --max-time 3 "http://127.0.0.1:${WEB_PORT}/" 2>/dev/null; then ok=1; break; fi
         sleep 1
     done
     [ "$ok" = "1" ] || web_rollback
