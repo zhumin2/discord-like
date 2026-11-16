@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-16（对应发布版本 **v1.1.0**，已上线）
+> 最后更新：2026-11-16（对应发布版本 **v1.1.3**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
@@ -291,6 +291,8 @@ git tag -a v1.1.x -m "说明" && git push origin v1.1.x
 为什么要走 CI：本机网络向 `uploads.github.com` 上传附件会被 GitHub abuse 检测拦截（403 Unicorn），
 而 Actions 由 GitHub 自己的 runner 上传，不受影响；同时产物可复现。
 服务器升级：`sudo curl -fLo /opt/chord/update.sh <latest>/update.sh && sudo bash /opt/chord/update.sh web`
+（v1.1.3 起 update.sh web 具备：更新前备份 serveweb+htdocs、二进制原子替换、启动后 curl 探活、失败自动回滚并以非零码退出；
+自定义端口用 `WEB_PORT=xxxx` 传入，否则默认 3000 探活）
 （v1.1.2 起 update.sh web 会在包内含 serveweb 时一并升级静态服务器二进制）。
 
 **旧流程（手动/设备码认证，仅在没有 CI 时使用）**
