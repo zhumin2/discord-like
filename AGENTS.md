@@ -291,6 +291,23 @@ git tag -a v1.1.x -m "说明" && git push origin v1.1.x
 为什么要走 CI：本机网络向 `uploads.github.com` 上传附件会被 GitHub abuse 检测拦截（403 Unicorn），
 而 Actions 由 GitHub 自己的 runner 上传，不受影响；同时产物可复现。
 服务器升级：`sudo curl -fLo /opt/chord/update.sh <latest>/update.sh && sudo bash /opt/chord/update.sh web`
+
+### 8.3.1 每个 Release 的完整附件（v1.1.3 起）
+
+`release-web`（Web + 全量部署包 + update.sh）与 `release-clients`（Windows zip + 3 个 APK）两个工作流
+在推 tag 时并行执行，因此每个版本的 Release 都自带 7 个附件：
+
+```
+chord-web-update.tar.gz  chord-deploy.tar.gz  update.sh
+chord-windows-x64.zip    chord-arm64.apk  chord-armv7.apk  chord-universal.apk
+```
+
+⚠️ **不要让某个版本缺少附件**：README 里的下载链接用 `releases/latest/download/<文件名>`，
+一旦最新版本缺客户端，链接立即 404（v1.1.2/v1.1.3 初期就踩过）。
+历史版本补附件：Actions → release-clients → Run workflow，填已存在的 tag。
+注意 Windows runner 控制台是 cp1252，打包脚本里不要 print 中文（会 UnicodeEncodeError）。
+
+
 （v1.1.3 起 update.sh web 具备：更新前备份 serveweb+htdocs、二进制原子替换、启动后 curl 探活、失败自动回滚并以非零码退出；
 自定义端口用 `WEB_PORT=xxxx` 传入，否则默认 3000 探活）
 （v1.1.2 起 update.sh web 会在包内含 serveweb 时一并升级静态服务器二进制）。
