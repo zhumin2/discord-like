@@ -91,7 +91,11 @@
 7. **Flutter Web + 无头浏览器自动化**：canvas 渲染 DOM 快照为空，需先 `dispatchEvent(click)` 激活 `flt-semantics-placeholder`；截图偶发超时，改视口 ±1px 可解；Prepared token 注入键为 `flutter.<key>` 且值需 `JSON.stringify`（SharedPreferences 语义）。
 8. **shared_preferences 插件使 Windows 构建需要开发者模式**（符号链接）→ 已移除并自研 storage 抽象。**不要给 client/gui 加任何平台插件**，托盘/窗口行为全走原生 C++。
 9. **miniredis 只支持随机端口**：fakeredis 用 TCP 字节透传（net.Listen 6379 → Dial miniredis）固定端口，Redis 协议是纯流，透传无损。
-10. **Windows 控制台 GBK**：含中文的 bash/python 脚本输出需 `PYTHONIOENCODING`/`-X utf8`；C++/SQL 交互避免在命令行内联中文字面量（会被转码污染）。
+10. **Windows 控制台 GBK**：含中文的 bash/python 脚本输出需 `PYTHONIOENCODING`/`-X utf8`；C++/SQL 交互避免在命令行内联中文字面量（会被转码污染）。用 curl 发中文 JSON 到 API 也会被 GBK 污染成乱码——验证中文内容一律用 `python -X utf8` + `json.dumps(ensure_ascii=False).encode('utf-8')`。
+11. **后台构建必须在正确目录**：`flutter build web` 在非项目目录执行会 `Error: No pubspec.yaml file found` 但退出码可能被 `&&` 链掩盖，产物目录残留旧文件，导致发布包静默带旧代码（v1.1 曾因此把 v1.0 的 web 发到线上）。**发布前必须校验产物含新代码特征**（如 python 搜 bundle 中的中文转义序列、`/api/upload` 等标记，或对比文件大小/时间戳）。
+12. **serveweb gzip 必须声明 Content-Encoding**：只压缩 body 不设头 → 浏览器把 gzip 字节当明文 JS 执行，`SyntaxError` 后静默白屏（无显式报错）。验证压缩必须查响应头 + 浏览器真实加载，curl 只看 `size_download` 会漏。用 gzip 包装 `http.FileServer` 时要在 `WriteHeader` 里删 `Content-Length`、按状态码设 `Content-Encoding`。
+13. **gin 通配参数自带前导斜杠**：`c.Param("filepath")` 得到 `/202611/x.png`，在 Linux 上 `filepath.IsAbs()` 为 true（Windows 为 false）→ 用 `IsAbs` 做路径校验会造成"本地测试通过、线上 400"。正确做法：`strings.TrimPrefix(rel, "/")` 后只拒绝 `..` 与 `\`。
+14. **install.sh 用 restart 而非 `enable --now`**：对已运行的服务，`systemctl enable --now` 不会重启，新二进制落盘但不生效（曾导致 gzip 修复"部署成功"却未生效）。
 
 ## 六、验证方式
 
