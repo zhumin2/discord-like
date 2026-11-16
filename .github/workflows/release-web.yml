@@ -53,6 +53,10 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/serveweb" ./cmd/serveweb
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/chord-server" ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/redisprobe" ./cmd/redisprobe
 
       - name: Package chord-web-update.tar.gz
         run: |
@@ -64,6 +68,19 @@ jobs:
           ls -lh chord-web-update.tar.gz
           tar tzf chord-web-update.tar.gz | grep -E "web/serveweb$|web/main\.dart\..*js$" | head -3
 
+      # 全量部署包（install.sh 要求：chord-server / serveweb / web/index.html / update.sh）
+      - name: Package chord-deploy.tar.gz
+        run: |
+          mkdir -p pkg/package
+          cp chord-server serveweb redisprobe pkg/package/
+          cp deploy/install.sh deploy/update.sh pkg/package/
+          cp "deploy/部署说明.md" pkg/package/
+          cp -r client/build/web pkg/package/web
+          chmod +x pkg/package/chord-server pkg/package/serveweb pkg/package/redisprobe
+          tar czf chord-deploy.tar.gz -C pkg package
+          ls -lh chord-deploy.tar.gz
+          tar tzf chord-deploy.tar.gz | head -5
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
@@ -71,5 +88,6 @@ jobs:
           name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             chord-web-update.tar.gz
+            chord-deploy.tar.gz
             deploy/update.sh
           fail_on_unmatched_files: true
