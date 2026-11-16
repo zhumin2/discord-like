@@ -336,25 +336,9 @@ class _ChannelTile extends ConsumerWidget {
                 ),
               ),
             if (mentions > 0)
-              Container(
-                margin: const EdgeInsets.only(left: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: ChordColors.red,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                constraints: const BoxConstraints(minWidth: 16),
-                child: Text('$mentions',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 10.5, color: Colors.white)),
-              )
+              _CountBadge(count: mentions, mention: true)
             else if (unread > 0 && !selected)
-              Container(
-                margin: const EdgeInsets.only(left: 6),
-                width: 7,
-                height: 7,
-                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-              ),
+              _CountBadge(count: unread, mention: false),
           ],
         ),
       ),
@@ -532,17 +516,47 @@ class _DMTile extends ConsumerWidget {
                 ),
               ),
             ),
-            if (unread > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: ChordColors.red,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text('$unread',
-                    style: const TextStyle(fontSize: 10.5, color: Colors.white)),
-              ),
+            if (unread > 0) _CountBadge(count: unread, mention: false),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 未读/提及数字徽章。
+/// - 普通未读：深红底、常规字重（1-99，超过显示 99+）
+/// - @提及：亮红底 + 白色描边 + 轻微发光 + 粗体，视觉上更强
+class _CountBadge extends StatelessWidget {
+  final int count;
+  final bool mention;
+
+  const _CountBadge({required this.count, required this.mention});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count > 99 ? '99+' : '$count';
+    final color = mention ? const Color(0xFFFF2D3F) : const Color(0xFFDA373C);
+    return Container(
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      constraints: const BoxConstraints(minWidth: 18),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(10),
+        border: mention ? Border.all(color: const Color(0x73FFFFFF), width: 0.5) : null,
+        boxShadow: mention
+            ? [BoxShadow(color: color.withValues(alpha: 0.55), blurRadius: 6, spreadRadius: 1)]
+            : null,
+      ),
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 10.5,
+          height: 1.3,
+          color: Colors.white,
+          fontWeight: mention ? FontWeight.w800 : FontWeight.w600,
         ),
       ),
     );
