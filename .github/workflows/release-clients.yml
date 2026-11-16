@@ -50,11 +50,13 @@ jobs:
 
       - name: Package zip
         shell: python
+        env:
+          PYTHONIOENCODING: utf-8   # Windows runner 控制台默认 cp1252，避免中文 print 报错
         run: |
-          import os, zipfile, pathlib, shutil
+          import zipfile, pathlib
           src = pathlib.Path("client/build/windows/x64/runner/Release")
-          assert src.is_dir(), f"缺少构建产物: {src}"
-          # 可执行文件改中文名（zip 内文件名用 UTF-8 标志，兼容 Windows 解压）
+          assert src.is_dir(), f"missing build output: {src}"
+          # 可执行文件改中文名（zipfile 会自动设置 UTF-8 文件名标志）
           exe = src / "chord_client.exe"
           if exe.exists():
               exe.rename(src / "Chord聊天.exe")
@@ -63,7 +65,7 @@ jobs:
               for p in src.rglob("*"):
                   if p.is_file():
                       z.write(p, p.relative_to(src))
-          print("打包完成:", out.stat().st_size / 1048576, "MB")
+          print("packed:", round(out.stat().st_size / 1048576, 1), "MB")
 
       - uses: softprops/action-gh-release@v2
         with:
