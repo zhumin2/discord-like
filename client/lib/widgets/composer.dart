@@ -11,6 +11,11 @@ class Composer extends StatefulWidget {
   final Future<void> Function(String text) onSend;
   final VoidCallback onTyping;
   final Future<String?> Function()? onAttach;
+  // 引用回复（null = 非回复状态）
+  final String? replyAuthor;
+  final String? replySnippet;
+  final Color? replyColor;
+  final VoidCallback? onCancelReply;
 
   const Composer({
     super.key,
@@ -19,6 +24,10 @@ class Composer extends StatefulWidget {
     required this.onSend,
     required this.onTyping,
     this.onAttach,
+    this.replyAuthor,
+    this.replySnippet,
+    this.replyColor,
+    this.onCancelReply,
   });
 
   @override
@@ -90,12 +99,16 @@ class _ComposerState extends State<Composer> {
     final canSend = _ctl.text.trim().isNotEmpty;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 0, 16, 8 + MediaQuery.of(context).padding.bottom),
-      child: Container(
-        decoration: BoxDecoration(
-          color: ChordColors.bgLight,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.replyAuthor != null) _buildReplyBar(),
+          Container(
+            decoration: BoxDecoration(
+              color: ChordColors.bgLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -172,6 +185,58 @@ class _ComposerState extends State<Composer> {
             ),
           ],
         ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 引用回复提示条：显示"回复 某人 + 摘要"，可关闭。
+  Widget _buildReplyBar() {
+    final snippet = (widget.replySnippet ?? '').replaceAll('\n', ' ').trim();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: ChordColors.bgLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border(
+            left: BorderSide(color: widget.replyColor ?? ChordColors.blurple, width: 3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.reply, size: 14, color: widget.replyColor ?? ChordColors.blurple),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                const TextSpan(
+                    text: '回复 ',
+                    style: TextStyle(fontSize: 12.5, color: ChordColors.textMuted)),
+                TextSpan(
+                  text: widget.replyAuthor,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: widget.replyColor ?? ChordColors.blurple),
+                ),
+                TextSpan(
+                    text: snippet.isEmpty ? '' : '：$snippet',
+                    style: const TextStyle(fontSize: 12.5, color: ChordColors.textMuted)),
+              ]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          InkWell(
+            onTap: widget.onCancelReply,
+            borderRadius: BorderRadius.circular(4),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.close, size: 15, color: ChordColors.textMuted),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -31,6 +31,14 @@ class ChatArea extends ConsumerStatefulWidget {
 
 class _ChatAreaState extends ConsumerState<ChatArea> {
   final _scrollCtl = ScrollController();
+  Message? _replyTo; // 正在引用回复的消息（null=普通发送）
+
+  @override
+  void didUpdateWidget(covariant ChatArea old) {
+    super.didUpdateWidget(old);
+    // 切换频道/会话时清掉引用状态，避免回复到别的频道
+    if (old.channelId != widget.channelId) _replyTo = null;
+  }
 
   @override
   void dispose() {
@@ -148,6 +156,7 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                           msg: m,
                           compact: compact,
                           isMine: m.authorId == chat.me?.id,
+                          onReply: (msg) => setState(() => _replyTo = msg),
                           onToggleReaction: (id, emoji) =>
                               ref.read(chatProvider.notifier).toggleReaction(id, emoji),
                           onEdit: (id, content) =>
@@ -190,7 +199,15 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
         Composer(
           channelName: title.replaceFirst('#', ''),
           isDM: widget.isDM,
-          onSend: (text) => ref.read(chatProvider.notifier).send(widget.channelId, text),
+          replyAuthor: _replyTo?.author?.username,
+          replySnippet: _replyTo?.content,
+          replyColor: _replyTo == null ? null : _hexColor(_replyTo!.author?.avatarColor),
+          onCancelReply: () => setState(() => _replyTo = null),
+          onSend: (text) async {
+            final replyId = _replyTo?.id;
+            await ref.read(chatProvider.notifier).send(widget.channelId, text, replyToId: replyId);
+            if (mounted) setState(() => _replyTo = null);
+          },
           onTyping: () => ref.read(chatProvider.notifier).notifyTyping(widget.channelId),
           onAttach: () => _attachFile(),
         ),
@@ -270,5 +287,15 @@ class _EmptyState extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// 把 "#RRGGBB" 解析成 Color（引用条左侧色条用）；非法值返回 null。
+Color? _hexColor(String? hex) {
+  if (hex == null || hex.isEmpty) return null;
+  try {
+    return Color(int.parse(hex.replaceFirst('#', '0xFF')));
+  } catch (_) {
+    return null;
   }
 }

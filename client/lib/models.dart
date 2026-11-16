@@ -109,6 +109,8 @@ class Message {
   DateTime? editedAt;
   User? author;
   List<ReactionSummary> reactions;
+  String replyToId;
+  MessageReply? replyTo;
 
   Message({
     required this.id,
@@ -119,6 +121,8 @@ class Message {
     this.editedAt,
     this.author,
     List<ReactionSummary>? reactions,
+    this.replyToId = '',
+    this.replyTo,
   }) : reactions = reactions ?? const [];
 
   factory Message.fromJson(Map<String, dynamic> j) => Message(
@@ -132,6 +136,29 @@ class Message {
         reactions: (j['reactionSummaries'] as List?)
                 ?.map((e) => ReactionSummary.fromJson(e))
                 .toList(),
+        replyToId: j['replyToId'] as String? ?? '',
+        replyTo: j['replyTo'] == null ? null : MessageReply.fromJson(j['replyTo']),
+      );
+}
+
+/// 被引用消息的摘要（服务端截断到 ~120 字符）。
+class MessageReply {
+  final String id;
+  final String authorName;
+  final String authorColor;
+  final String content;
+  const MessageReply({
+    required this.id,
+    required this.authorName,
+    required this.authorColor,
+    required this.content,
+  });
+
+  factory MessageReply.fromJson(Map<String, dynamic> j) => MessageReply(
+        id: j['id'] as String,
+        authorName: j['authorName'] as String? ?? '未知用户',
+        authorColor: j['authorColor'] as String? ?? '#5865F2',
+        content: j['content'] as String? ?? '',
       );
 }
 

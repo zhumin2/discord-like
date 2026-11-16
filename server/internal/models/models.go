@@ -72,16 +72,18 @@ type DMChannel struct {
 
 // Messages.channel_id 不设外键：同时容纳频道消息（channels.id）与私信（dm_channels.id）。
 type Message struct {
-	ID        string    `gorm:"type:char(36);primaryKey" json:"id"`
-	ChannelID string    `gorm:"type:char(36);not null;index:idx_msg_ch_id,priority:1" json:"channelId"`
-	AuthorID  string    `gorm:"type:char(36);not null" json:"authorId"`
-	Content   string    `gorm:"type:text;not null" json:"content"`
+	ID        string     `gorm:"type:char(36);primaryKey" json:"id"`
+	ChannelID string     `gorm:"type:char(36);not null;index:idx_msg_ch_id,priority:1" json:"channelId"`
+	AuthorID  string     `gorm:"type:char(36);not null" json:"authorId"`
+	Content   string     `gorm:"type:text;not null" json:"content"`
+	ReplyToID string     `gorm:"type:char(36);not null;default:''" json:"replyToId"` // 引用回复的消息 ID（空=非回复）
 	EditedAt  *time.Time `json:"editedAt"`
-	CreatedAt time.Time `gorm:"index:idx_msg_ch_id,priority:2" json:"createdAt"`
+	CreatedAt time.Time  `gorm:"index:idx_msg_ch_id,priority:2" json:"createdAt"`
 
-	// 非持久化：JOIN 出的作者信息与回应汇总
+	// 非持久化：JOIN 出的作者信息、回应汇总、被引用消息摘要
 	Author            *UserDTO          `gorm:"-" json:"author,omitempty"`
 	ReactionSummaries []ReactionSummary `gorm:"-" json:"reactionSummaries"`
+	ReplyTo           *ReplyPreview     `gorm:"-" json:"replyTo,omitempty"`
 }
 
 // ReactionSummary 是某条消息一个 emoji 的聚合视图。
@@ -90,6 +92,14 @@ type ReactionSummary struct {
 	Count int      `json:"count"`
 	Mine  bool     `json:"mine"`
 	Users []string `json:"users,omitempty"` // 前 3 个用户 ID，供 tooltip
+}
+
+// ReplyPreview 是被引用消息的摘要，供客户端渲染"引用块"。
+type ReplyPreview struct {
+	ID          string `json:"id"`
+	AuthorName  string `json:"authorName"`
+	AuthorColor string `json:"authorColor"`
+	Content     string `json:"content"` // 已截断为 ~120 字符
 }
 
 type Reaction struct {

@@ -13,6 +13,8 @@ class MessageTile extends StatefulWidget {
   final void Function(String messageId, String emoji) onToggleReaction;
   final void Function(String messageId, String content) onEdit;
   final void Function(String messageId) onDelete;
+  final void Function(Message msg)? onReply;       // 引用回复
+  final void Function(String messageId)? onJumpToQuoted; // 点击引用块跳转
   final String Function(String url)? resolveUrl; // 相对 URL 解析（v1.1 图片）
 
   const MessageTile({
@@ -23,6 +25,8 @@ class MessageTile extends StatefulWidget {
     required this.onToggleReaction,
     required this.onEdit,
     required this.onDelete,
+    this.onReply,
+    this.onJumpToQuoted,
     this.resolveUrl,
   });
 
@@ -97,10 +101,21 @@ class _MessageTileState extends State<MessageTile> {
             ),
           );
 
+    // 引用块（被回复消息的摘要）
+    final quote = m.replyTo == null
+        ? null
+        : _QuoteBlock(reply: m.replyTo!, onTap: widget.onJumpToQuoted);
+
     final body = widget.compact
         ? Padding(
             padding: const EdgeInsets.only(left: 68, right: 48),
-            child: content,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (quote != null) quote,
+                content,
+              ],
+            ),
           )
         : Padding(
             padding: const EdgeInsets.only(left: 16, right: 48, top: 2, bottom: 2),
@@ -135,6 +150,7 @@ class _MessageTileState extends State<MessageTile> {
                                   fontSize: 11, color: ChordColors.textMuted)),
                         ],
                       ),
+                      if (quote != null) quote,
                       content,
                     ],
                   ),
@@ -183,6 +199,7 @@ class _MessageTileState extends State<MessageTile> {
               child: _ActionBar(
                 isMine: widget.isMine,
                 onReact: _showReactionPicker,
+                onReply: widget.onReply == null ? null : () => widget.onReply!(widget.msg),
                 onEdit: widget.isMine
                     ? () => setState(() {
                           _editCtl.text = widget.msg.content;
@@ -277,12 +294,14 @@ class _MessageTileState extends State<MessageTile> {
 class _ActionBar extends StatelessWidget {
   final bool isMine;
   final VoidCallback onReact;
+  final VoidCallback? onReply;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
   const _ActionBar({
     required this.isMine,
     required this.onReact,
+    this.onReply,
     this.onEdit,
     this.onDelete,
   });
@@ -314,6 +333,7 @@ class _ActionBar extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           btn(Icons.add_reaction_outlined, '添加回应', onReact),
+          if (onReply != null) btn(Icons.reply, '引用回复', onReply),
           if (isMine) btn(Icons.edit_outlined, '编辑', onEdit),
           if (isMine) btn(Icons.delete_outline, '删除', onDelete, color: ChordColors.red),
         ],
@@ -398,6 +418,62 @@ class _EmojiButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(emoji, style: const TextStyle(fontSize: 24)),
+      ),
+    );
+  }
+}
+
+/// 引用块：显示被回复消息的作者与摘要。
+class _QuoteBlock extends StatelessWidget {
+  final MessageReply reply;
+  final void Function(String messageId)? onTap;
+
+  const _QuoteBlock({required this.reply, this.onTap});
+
+  Color get _color {
+    try {
+      return Color(int.parse(reply.authorColor.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return ChordColors.blurple;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final snippet = reply.content.replaceAll('\n', ' ').trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: InkWell(
+        onTap: onTap == null ? null : () => onTap!(reply.id),
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 520),
+          padding: const EdgeInsets.fromLTRB(8, 3, 8, 3),
+          decoration: BoxDecoration(
+            color: const Color(0x14FFFFFF),
+            borderRadius: BorderRadius.circular(4),
+            border: Border(left: BorderSide(color: _color, width: 3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.reply, size: 12, color: ChordColors.textMuted),
+              const SizedBox(width: 4),
+              Text(reply.authorName,
+                  style: TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w600, color: _color)),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  snippet.isEmpty ? '（无文字内容）' : snippet,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12.5, color: ChordColors.textMuted),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

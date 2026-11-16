@@ -372,11 +372,11 @@ class ChatNotifier extends Notifier<ChatState> {
 
   // ---------- 消息操作 ----------
 
-  Future<void> send(String channelId, String content) async {
+  Future<void> send(String channelId, String content, {String? replyToId}) async {
     final trimmed = content.trim();
     if (trimmed.isEmpty) return;
     try {
-      final msg = await _api.sendMessage(channelId, trimmed);
+      final msg = await _api.sendMessage(channelId, trimmed, replyToId: replyToId);
       _appendMessage(msg);
       _markRead(channelId);
     } on ApiException catch (e) {

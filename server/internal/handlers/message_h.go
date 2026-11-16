@@ -42,11 +42,17 @@ func (s *Server) attachExtras(msgs []models.Message, viewerID string) {
 	ids := make([]string, len(msgs))
 	authorIDs := make([]string, 0, len(msgs))
 	seenAuthor := map[string]bool{}
+	replyIDs := make([]string, 0, len(msgs))
+	seenReply := map[string]bool{}
 	for i, m := range msgs {
 		ids[i] = m.ID
 		if !seenAuthor[m.AuthorID] {
 			seenAuthor[m.AuthorID] = true
 			authorIDs = append(authorIDs, m.AuthorID)
+		}
+		if m.ReplyToID != "" && !seenReply[m.ReplyToID] {
+			seenReply[m.ReplyToID] = true
+			replyIDs = append(replyIDs, m.ReplyToID)
 		}
 	}
 	// 作者
@@ -87,12 +93,58 @@ func (s *Server) attachExtras(msgs []models.Message, viewerID string) {
 			dto := a
 			msgs[i].Author = &dto
 		}
+	}
+
+	// 被引用的消息（摘要预览）
+	replyMap := map[string]*models.ReplyPreview{}
+	if len(replyIDs) > 0 {
+		var quoted []models.Message
+		s.DB.Where("id IN ?", replyIDs).Find(&quoted)
+		qAuthorIDs := make([]string, 0, len(quoted))
+		seenQ := map[string]bool{}
+		for _, q := range quoted {
+			if !seenQ[q.AuthorID] {
+				seenQ[q.AuthorID] = true
+				qAuthorIDs = append(qAuthorIDs, q.AuthorID)
+			}
+		}
+		var qAuthors []models.User
+		s.DB.Where("id IN ?", qAuthorIDs).Find(&qAuthors)
+		qmap := map[string]models.User{}
+		for _, a := range qAuthors {
+			qmap[a.ID] = a
+		}
+		for _, q := range quoted {
+			name, color := "未知用户", "#5865F2"
+			if a, ok := qmap[q.AuthorID]; ok {
+				name, color = a.Username, a.AvatarColor
+			}
+			replyMap[q.ID] = &models.ReplyPreview{
+				ID: q.ID, AuthorName: name, AuthorColor: color,
+				Content: truncateRunes(q.Content, 120),
+			}
+		}
+	}
+
+	for i := range msgs {
 		if list := rmap[msgs[i].ID]; len(list) > 0 {
 			msgs[i].ReactionSummaries = list
 		} else {
 			msgs[i].ReactionSummaries = []reactionSummary{}
 		}
+		if p, ok := replyMap[msgs[i].ReplyToID]; ok {
+			msgs[i].ReplyTo = p
+		}
 	}
+}
+
+// truncateRunes 按字符（而非字节）截断，避免切坏中文/emoji。
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // ---------- 消息 CRUD ----------
@@ -128,7 +180,8 @@ func (s *Server) ListMessages(c *gin.Context) {
 }
 
 type sendMsgReq struct {
-	Content string `json:"content"`
+	Content   string `json:"content"`
+	ReplyToID string `json:"replyToId"` // 引用回复（可选）
 }
 
 // SendMessage 发送消息（频道或 DM），广播 MESSAGE_CREATE。
@@ -150,19 +203,27 @@ func (s *Server) SendMessage(c *gin.Context) {
 		fail(c, 400, "消息需为 1-2000 个字符")
 		return
 	}
+	// 引用目标必须存在且属于同一频道（防止跨频道引用泄漏）
+	replyToID := strings.TrimSpace(req.ReplyToID)
+	if replyToID != "" {
+		var quoted models.Message
+		if err := s.DB.Where("id = ? AND channel_id = ?", replyToID, cid).First(&quoted).Error; err != nil {
+			fail(c, 400, "被引用的消息不存在")
+			return
+		}
+	}
 	msg := models.Message{
 		ID: models.NewID(), ChannelID: cid, AuthorID: uid, Content: content,
-		CreatedAt: time.Now(),
+		ReplyToID: replyToID, CreatedAt: time.Now(),
 	}
 	if err := s.DB.Create(&msg).Error; err != nil {
 		fail(c, 500, "发送失败")
 		return
 	}
-	var u models.User
-	s.DB.Where("id = ?", uid).First(&u)
-	dto := u.DTO()
-	msg.Author = &dto
-	msg.ReactionSummaries = []reactionSummary{}
+	// 统一补齐作者 / 回应 / 引用摘要后再广播
+	one := []models.Message{msg}
+	s.attachExtras(one, uid)
+	msg = one[0]
 	s.Hub.Broadcast(topic, ws.NewEnvelope(ws.EvMessageCreate, msg))
 	c.JSON(200, msg)
 }

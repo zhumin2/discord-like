@@ -142,8 +142,11 @@ class ApiClient {
     return (r as List).map((e) => Message.fromJson(e)).toList();
   }
 
-  Future<Message> sendMessage(String channelId, String content) async =>
-      Message.fromJson(await _call('POST', '/channels/$channelId/messages', body: {'content': content}));
+  Future<Message> sendMessage(String channelId, String content, {String? replyToId}) async =>
+      Message.fromJson(await _call('POST', '/channels/$channelId/messages', body: {
+        'content': content,
+        if (replyToId != null && replyToId.isNotEmpty) 'replyToId': replyToId,
+      }));
 
   Future<Message> editMessage(String messageId, String content) async =>
       Message.fromJson(await _call('PATCH', '/messages/$messageId', body: {'content': content}));
