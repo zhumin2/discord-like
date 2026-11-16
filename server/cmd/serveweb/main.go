@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -43,16 +44,26 @@ func contentTypeFor(p string) string {
 
 // ---- 缓存策略 ----
 
+// hashedAssetRe 匹配带内容哈希的文件名（如 main.dart.cc12c555.js、NotoSansSC-Bold.b55fb621.ttf）。
+// 由前端 `flutter build web --web-content-hash` 生成：内容变化时文件名随之变化，
+// 因此可以安全长缓存（immutable）；升级后新 index/bootstrap 指向新文件名，旧文件自然淘汰。
+var hashedAssetRe = regexp.MustCompile(`\.[0-9a-f]{8,}\.[A-Za-z0-9]+$`)
+
 // cacheControl 按路径返回 Cache-Control。
-// 注意：Flutter Web 构建产物的文件名**不含内容哈希**（main.dart.js、字体、canvaskit 都是稳定名），
-// 因此绝不能长缓存——否则升级后浏览器继续用旧 bundle/旧图标字体（v1.1 曾因此丢图标与旧代码）。
-//   - 入口与 bundle：no-cache（每次协商，304 很便宜，且有 gzip）
-//   - 其余资源：1 小时（同一构建内可复用，升级后最多 1 小时自然过期）
+//   - 入口/清单：no-cache（每次协商，304 很便宜，且有 gzip）——保证升级立即生效
+//   - 带内容哈希的资源：1 年 immutable（二次访问零请求）
+//   - 未哈希的资源（canvaskit/**、icons/** 在 --no-web-resources-cdn 下不做哈希）：1 小时
+//
+// 注意：绝不能给**未哈希**的稳定文件名（canvaskit.wasm、旧版 main.dart.js）设长缓存——
+// v1.1 曾因 immutable 导致升级后继续用旧 bundle/旧图标字体（按钮空白）。
 func cacheControl(p string) string {
 	switch p {
 	case "/", "/index.html", "/flutter_bootstrap.js", "/flutter_service_worker.js",
-		"/main.dart.js", "/flutter.js", "/version.json", "/manifest.json", "/favicon.png":
+		"/flutter.js", "/version.json", "/manifest.json", "/precache_manifest.json", "/favicon.png":
 		return "no-cache"
+	}
+	if hashedAssetRe.MatchString(p) {
+		return "public, max-age=31536000, immutable"
 	}
 	if strings.HasPrefix(p, "/assets/") ||
 		strings.HasPrefix(p, "/canvaskit/") ||

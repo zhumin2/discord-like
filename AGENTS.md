@@ -187,9 +187,10 @@
 13. **gin 通配参数自带前导 `/`**：`c.Param("filepath")` 得到 `/202611/x.png`，Linux 上 `filepath.IsAbs` 为 true
     （Windows 为 false）→ 用 IsAbs 校验会"本地过、线上 400"。剥前缀后只拒 `..` 与 `\`。
 14. **install.sh 用 restart 而非 `enable --now`**：对已运行服务 `systemctl enable --now` 不重启，新二进制不生效。
-15. **Flutter Web 产物绝不能长缓存**：`main.dart.js`、`assets/fonts/*`、`canvaskit/*` 的 URL 都**不含内容哈希**。
-    设 `immutable` 一年会导致升级后继续用旧 bundle / 旧 tree-shaken 图标字体（曾致"按钮存在但图标空白"）。
-    现策略：入口与 bundle `no-cache`，`/assets/ /canvaskit/ /icons/` `max-age=3600`。
+15. **缓存必须区分「有无内容哈希」**：加 `--web-content-hash` 前，`main.dart.js`、字体、`canvaskit/*` 都是稳定文件名，
+    设 `immutable` 会导致升级后继续用旧 bundle / 旧图标字体（曾致"按钮存在但图标空白"）。
+    现策略（serveweb `cacheControl`）：入口/清单 `no-cache`；文件名含 8 位以上十六进制哈希的资源
+    `max-age=31536000, immutable`（`--web-content-hash` 产出）；**canvaskit/ 与 icons/ 不参与哈希** → 保持 `max-age=3600`。
     **排查信号：语义树里有控件、但截图空白 → 先怀疑字体缓存**。
 16. **`flutter build web --wasm` 部署到无 COOP/COEP 头的服务器会白屏**（`crossOriginIsolated=false`，
     skwasm 卡死、`flutter-view` 永不创建）。本项目必须用普通 `--release`（CanvasKit/dart2js）；
@@ -257,7 +258,8 @@ go vet ./... && go test ./internal/handlers/     # 测试
 
 # Web（必须 cd client/；默认地址按需改）
 # ⚠️ 必须带 --no-web-resources-cdn：否则 CanvasKit 从 www.gstatic.com 拉（国内被墙 → 白屏/极慢）
-cd client && flutter build web --release --no-web-resources-cdn --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
+# ⚠️ 必须带 --web-content-hash：产物文件名带内容哈希 → serveweb 才能给 immutable 长缓存（二次访问零下载）
+cd client && flutter build web --release --no-web-resources-cdn --web-content-hash --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081
 # 校验产物含新代码（关键！）：
 python -X utf8 -c "d=open('build/web/main.dart.js',encoding='utf-8',errors='ignore').read(); print(d.count(r'\u53d1\u9001\u6587\u4ef6'), d.count('/api/upload'))"
 
