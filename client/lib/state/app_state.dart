@@ -157,6 +157,7 @@ class ChatState {
 class ChatNotifier extends Notifier<ChatState> {
   Timer? _typingThrottle;
   final Map<String, Timer> _typingClear = {};
+  Timer? _presenceTimer;
 
   @override
   ChatState build() {
@@ -169,8 +170,15 @@ class ChatNotifier extends Notifier<ChatState> {
     }
     // WS 事件 → 状态更新
     final sub = gw.events.listen(_onEvent);
+    // 每次（重新）连上后重同步在线状态：断线期间的 PRESENCE/MEMBER 事件会丢失，
+    // 不补拉就会停在旧快照（表现为「明明在线却显示离线」）
+    final openSub = gw.onOpen.listen((_) => _resyncPresence());
+    // 兜底：每分钟刷新一次成员在线状态（防事件丢失/时钟漂移导致状态滞留）
+    _presenceTimer?.cancel();
+    _presenceTimer = Timer.periodic(const Duration(seconds: 60), (_) => _resyncPresence());
     ref.onDispose(() {
       sub.cancel();
+      openSub.cancel();
       _cancelTimers();
     });
     // 首次（或重新登录）进入时引导加载
@@ -178,8 +186,17 @@ class ChatNotifier extends Notifier<ChatState> {
     return const ChatState(loading: true);
   }
 
+  /// 重新拉取当前服务器成员（在线状态随 REST 返回），并刷新未读汇总。
+  Future<void> _resyncPresence() async {
+    final gid = state.guildId;
+    if (gid == null) return;
+    await _loadMembers(gid);
+  }
+
   void _cancelTimers() {
     _typingThrottle?.cancel();
+    _presenceTimer?.cancel();
+    _presenceTimer = null;
     for (final t in _typingClear.values) {
       t.cancel();
     }
