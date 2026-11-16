@@ -132,8 +132,10 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-info "启动服务 chord-server / chord-web"
-systemctl enable --now chord-server chord-web
+info "启动/重启服务 chord-server / chord-web"
+# restart 而非 enable --now：已运行的老进程必须重启才能用上新二进制
+systemctl enable chord-server chord-web >/dev/null 2>&1
+systemctl restart chord-server chord-web
 
 # ---------- 6. 本机防火墙（如有启用才动） ----------
 open_port() {
