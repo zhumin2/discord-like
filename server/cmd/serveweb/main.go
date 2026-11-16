@@ -61,7 +61,8 @@ func cacheControl(p string) string {
 // ---- gzip 响应包装 ----
 
 // gzipResponseWriter 拦截 WriteHeader 删除未压缩的 Content-Length，
-// 避免 http.ServeContent 预设长度与 gzip 实际输出不一致导致截断。
+// 避免 http.ServeContent 预设长度与 gzip 实际输出不一致导致截断；
+// 并声明 Content-Encoding（仅对有实体的响应——304 等无 body 状态不声明）。
 type gzipResponseWriter struct {
 	http.ResponseWriter
 	gz      *gzip.Writer
@@ -75,6 +76,9 @@ func (w *gzipResponseWriter) WriteHeader(code int) {
 	w.started = true
 	w.Header().Del("Content-Length")
 	w.Header().Add("Vary", "Accept-Encoding")
+	if code == http.StatusOK || code == http.StatusPartialContent {
+		w.Header().Set("Content-Encoding", "gzip")
+	}
 	w.ResponseWriter.WriteHeader(code)
 }
 
