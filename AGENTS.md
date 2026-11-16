@@ -278,7 +278,22 @@ tar czf chord-deploy.tar.gz package/            # 全量
 cd package && tar czf chord-web-update.tar.gz web/   # 仅前端
 ```
 
-### 8.3 发布 Release（含设备码认证）
+### 8.3 发布 Release
+
+**推荐（v1.1.2 起）：推 tag 触发 GitHub Actions 自动构建发布**
+
+```bash
+git tag -a v1.1.x -m "说明" && git push origin v1.1.x
+# .github/workflows/release-web.yml 会在 CI 里构建 Web + serveweb 并上传到该 Release
+# 产物：chord-web-update.tar.gz（含 web/serveweb）、update.sh
+```
+
+为什么要走 CI：本机网络向 `uploads.github.com` 上传附件会被 GitHub abuse 检测拦截（403 Unicorn），
+而 Actions 由 GitHub 自己的 runner 上传，不受影响；同时产物可复现。
+服务器升级：`sudo curl -fLo /opt/chord/update.sh <latest>/update.sh && sudo bash /opt/chord/update.sh web`
+（v1.1.2 起 update.sh web 会在包内含 serveweb 时一并升级静态服务器二进制）。
+
+**旧流程（手动/设备码认证，仅在没有 CI 时使用）**
 
 1. 远端必须是 SSH：`git@github.com:zhumin2/discord-like.git`（本机 `~/.ssh/config` 已指 ssh.github.com:443）。
 2. 认证：`gh.exe` 存储校验要求 `read:org`，故**不要 `gh auth login`**；改用 OAuth 设备流拿 token：
