@@ -324,11 +324,15 @@ class ChatNotifier extends Notifier<ChatState> {
       final existing = {for (final m in list) m.id};
       final noMore = Set.of(state.noMore);
       if (before == null) {
+        // 服务端 ListMessages 已返回时间正序（旧→新），这里不能再 reversed，
+        // 否则历史记录会倒序显示（新消息在上、旧消息在下）。UI 用 reverse:true 列表，
+        // 列表末尾（最新）渲染在最下方。
         list
           ..clear()
-          ..addAll(msgs.reversed);
+          ..addAll(msgs);
       } else {
-        final older = msgs.reversed.where((m) => !existing.contains(m.id)).toList();
+        // 更早的一页同样是正序，插到列表头部保持整体升序
+        final older = msgs.where((m) => !existing.contains(m.id)).toList();
         list.insertAll(0, older);
       }
       if (msgs.length < 50) noMore.add(channelId);
