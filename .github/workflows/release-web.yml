@@ -64,6 +64,14 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/redisprobe" ./cmd/redisprobe
 
+      - name: Verify version baked into artifacts
+        # 防止 --dart-define / -ldflags 注入失配（缺了会变成 dev，线上却看不出来）
+        run: |
+          main=$(ls client/build/web/main.dart.*.js | head -1)
+          grep -q -- "$CHORD_VERSION" "$main" || { echo "web bundle missing $CHORD_VERSION"; exit 1; }
+          grep -aq -- "$CHORD_VERSION" chord-server || { echo "chord-server missing $CHORD_VERSION"; exit 1; }
+          echo "OK: $CHORD_VERSION found in $main and chord-server"
+
       - name: Package chord-web-update.tar.gz
         run: |
           mkdir -p pkg/web
