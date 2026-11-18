@@ -22,6 +22,9 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    env:
+      # 版本号注入：客户端 --dart-define=CHORD_VERSION，后端 -ldflags -X ...Version
+      CHORD_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,7 +49,9 @@ jobs:
           flutter pub get
           # --no-web-resources-cdn：CanvasKit 本地化（gstatic 在国内不可达）
           # --web-content-hash：文件名带哈希，配合 serveweb 的 immutable 缓存
-          flutter build web --release --no-web-resources-cdn --web-content-hash
+          # --dart-define=CHORD_VERSION：登录页/设置页显示「客户端版本」（与后端 /api/health 对照）
+          flutter build web --release --no-web-resources-cdn --web-content-hash \
+            --dart-define=CHORD_VERSION=$CHORD_VERSION
 
       - name: Build serveweb (linux/amd64)
         working-directory: server
@@ -54,7 +59,8 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/serveweb" ./cmd/serveweb
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/chord-server" ./cmd/server
+            go build -trimpath -ldflags="-s -w -X chord/server/internal/handlers.Version=$CHORD_VERSION" \
+            -o "$GITHUB_WORKSPACE/chord-server" ./cmd/server
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/redisprobe" ./cmd/redisprobe
 

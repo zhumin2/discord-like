@@ -4,12 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../server_version.dart';
 import '../widgets/avatar.dart';
 import '../image_compress.dart';
 import '../file_picker.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
-import 'avatar.dart';
 
 /// 一次性弹窗集合：建服务器/邀请码/建频道/退服/删频道/搜用户发私信。
 
@@ -635,6 +635,10 @@ class _ProfileSettingsDialogState extends ConsumerState<_ProfileSettingsDialog> 
               const SizedBox(height: 10),
               Text(_err!, style: const TextStyle(color: ChordColors.red, fontSize: 13)),
             ],
+            const SizedBox(height: 12),
+            Divider(height: 1),
+            const SizedBox(height: 8),
+            VersionText(),
           ],
         ),
       ),

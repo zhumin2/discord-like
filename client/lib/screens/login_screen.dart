@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api_client.dart';
+import '../server_version.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 
@@ -183,6 +184,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   child: const Text('使用演示账号 (alice / 123456)',
                       style: TextStyle(fontSize: 13, color: ChordColors.textMuted)),
                 ),
+                const SizedBox(height: 2),
+                const VersionText(),
               ],
             ),
           ),

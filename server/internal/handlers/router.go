@@ -14,6 +14,10 @@ import (
 )
 
 // Server 聚合依赖，注册所有 REST 路由。
+// Version 由 go build -ldflags 注入（CI 打 tag 时写入形如 v1.3.1），
+// /api/health 返回给客户端，用于测试时核对前后端版本。
+var Version = "dev"
+
 type Server struct {
 	DB  *gorm.DB
 	Hub *ws.Hub
@@ -23,7 +27,9 @@ type Server struct {
 func (s *Server) RegisterRoutes(r *gin.Engine) {
 	r.Use(s.cors())
 
-	r.GET("/api/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
+	r.GET("/api/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok", "version": Version})
+	})
 	r.GET("/ws", s.Hub.HandleWS)
 	// 上传文件读取（文件名为不可猜测 UUID，公开可读）
 	r.GET("/uploads/*filepath", s.serveUpload)
