@@ -235,6 +235,7 @@
     `C:/Program Files/Git/canvaskit/` 写进构建产物。带 `/` 开头的 define 必须加 `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'`，
     并在产物里 `grep` 校验实际注入值。
 21. **聊天记录顺序**：服务端 `ListMessages` 已把结果翻成时间正序返回（旧→新）；客户端 `_loadMessages` **不能再 reversed**，否则历史倒序（新消息在上）。UI 用 `ListView(reverse:true)`，列表末尾（最新）渲染在最下方。该 bug 自 MVP 就存在，因新消息走 WS 追加到末尾看似正常而长期未发现（v1.1.6 修复）。
+22. **Android release APK 连不上服务器**（v1.2.4 修复）：Flutter 模板的 `INTERNET` 权限只在 `debug/`、`profile/` 清单里，**`main/AndroidManifest.xml` 必须自己加** `<uses-permission android:name="android.permission.INTERNET"/>`，否则 release APK 完全断网；且 Android 9+ 默认禁明文 HTTP，服务器为 http:// 时必须加 `android:usesCleartextTraffic="true"`。两处叠加导致 v1.2.3 及之前的 APK 无法使用。附带修复：Android 上 `%APPDATA%`/`resolvedExecutable` 均不可用 → 登录态静默丢失；MainActivity 的 `chord/file` 通道新增 `storagePath` 方法返回 `filesDir`，storage_io 检测 Android 后走通道取路径。
 
 ---
 
@@ -386,9 +387,13 @@ for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code} " -X POST <api>/a
 
 ## 十、已知限制 / 待办
 
-**线上状态（重要）**：服务器 `/opt/chord` 目前是 **Web v1.1.9 + 后端 v1.1.3 二进制**。
-v1.2.0 起的功能（消息引用回复）**需要跑 `sudo bash /opt/chord/update.sh server`** 才能生效
-（会换 chord-server 并自动迁移 `reply_to_id` 列）。v1.2.1+ 的 update.sh 才支持 `server` 模式。
+**线上状态（2026-11-18 核对）**：服务器 Web 产物最后确认到 **v1.1.7**（bundle `main.dart.03aeab75.js`，
+用户此后是否跑过 v1.1.8/v1.1.9 的 update.sh web 未经确认）；**后端二进制仍是 v1.1.3**。
+核对方法：`curl -s http://129.226.159.168:3000/flutter_bootstrap.js | grep -oE "main\.dart\.[a-f0-9]+\.js"`
+与本地 `client/build/web/` 的文件名比对。
+- 要启用 v1.2.0 引用回复：`sudo curl -fLo /opt/chord/update.sh https://github.com/zhumin2/discord-like/releases/latest/download/update.sh`
+  然后 `sudo bash /opt/chord/update.sh server && sudo bash /opt/chord/update.sh web`
+  （server 模式换 chord-server 并自动迁移 `reply_to_id` 列；v1.2.1+ 的 update.sh 才支持 server 模式，所以必须先刷新脚本）。
 
 **v1.1 遗留**：TLS 待域名（`deploy/caddy/Caddyfile` 已就绪）；CDN 未接入；每日备份 cron 未配置；
 APK 为 debug 签名；Windows 无代码签名。
