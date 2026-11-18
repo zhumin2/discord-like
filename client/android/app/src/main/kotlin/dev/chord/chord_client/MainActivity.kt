@@ -20,22 +20,25 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "chord/file")
             .setMethodCallHandler { call, result ->
-                if (call.method == "pickFile") {
-                    val imagesOnly = call.argument<Boolean>("imagesOnly") ?: false
-                    pendingResult = result
-                    val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = if (imagesOnly) "image/*" else "*/*"
+                when (call.method) {
+                    // v1.1.9+: 前端 storage 抽象在 Android 上需要可写私有目录
+                    "storagePath" -> result.success(File(filesDir, "storage").absolutePath)
+                    "pickFile" -> {
+                        val imagesOnly = call.argument<Boolean>("imagesOnly") ?: false
+                        pendingResult = result
+                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = if (imagesOnly) "image/*" else "*/*"
+                        }
+                        try {
+                            startActivityForResult(
+                                Intent.createChooser(intent, "选择文件"), pickRequest)
+                        } catch (e: Exception) {
+                            pendingResult = null
+                            result.error("unavailable", e.message, null)
+                        }
                     }
-                    try {
-                        startActivityForResult(
-                            Intent.createChooser(intent, "选择文件"), pickRequest)
-                    } catch (e: Exception) {
-                        pendingResult = null
-                        result.error("unavailable", e.message, null)
-                    }
-                } else {
-                    result.notImplemented()
+                    else -> result.notImplemented()
                 }
             }
     }

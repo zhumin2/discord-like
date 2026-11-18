@@ -30,7 +30,7 @@ class ServerBaseNotifier extends Notifier<String> {
   }
 
   static Future<void> restore() async {
-    _initial = KeyValueStore.getString('serverBase') ?? _initial;
+    _initial = await KeyValueStore.getString('serverBase') ?? _initial;
   }
 
   Future<void> set(String v) async {
@@ -51,7 +51,7 @@ class TokenNotifier extends Notifier<String?> {
   static String? _initial;
 
   static Future<void> restore() async {
-    _initial = KeyValueStore.getString('token');
+    _initial = await KeyValueStore.getString('token');
   }
 
   Future<void> set(String? v) async {

@@ -1,8 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 联网权限：Flutter 模板只在 debug/profile 清单里有，release 必须自己加 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Chord聊天"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
+        <!-- usesCleartextTraffic：服务器暂为 http://（TLS 待域名），Android 9+ 默认禁明文会被切断 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
