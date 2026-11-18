@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-18（对应发布版本 **v1.3.1**，已上线）
+> 最后更新：2026-11-18（对应发布版本 **v1.3.2**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
@@ -201,7 +201,7 @@
 **注意**：改动 users 表（avatar_url）与消息引用（reply_to_id）都依赖后端二进制更新；
 线上后端若仍是 v1.1.3，需 `update.sh server`（见第十节线上状态）。
 
-### 阶段 9：v1.3.1（2026-11-18）
+### 阶段 9：v1.3.1 → v1.3.2（2026-11-18）
 
 **版本号互查**：三端客户端都能看到「客户端版本 ｜ 服务器版本」，测试时可直接判断前后端是否配套。
 
@@ -213,6 +213,9 @@
 | 验证 | `scripts/guitest/version_check.mjs`：无头 Edge 打开登录页，断言界面出现与 `/api/health` 相同的版本串 |
 
 **本地构建默认是 `dev`**，只有 CI（release-web / release-clients）注入 tag；排查线上版本时以页面显示 + `/api/health` 为准。
+
+**v1.3.2**：release-web 增加「Verify version baked into artifacts」步骤——构建后 `grep` 校验
+`main.dart.<hash>.js` 与 `chord-server` 二进制里确实含有 `$CHORD_VERSION`，缺失直接失败（避免注入失配静默变成 `dev`）。
 
 ---
 ---
