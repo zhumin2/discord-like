@@ -187,6 +187,21 @@
 - "部署了但没生效"是反复出现的模式：必须校验产物哈希（`main.dart.<hash>.js` 与本地一致）而不是看脚本打印成功。
 - 发布附件不全会让 README 的 `releases/latest/download/...` 立刻 404（v1.1.3 初期），故每个 tag 必须产出 7 个附件。
 
+### 阶段 8：v1.3.0（2026-11-18）
+
+用户四项反馈后的一轮迭代（Android APK 断网修复见 v1.2.4/坑 22）：
+
+| 项 | 内容 |
+|---|---|
+| 个人资料 | `PATCH /users/me`（用户名/颜色/头像，`avatar_url` 列 AutoMigrate）；USER_UPDATE 广播到所在服务器+私信+自己；客户端设置对话框（头像上传相机角标、10 色调色板、用户名） |
+| 图片缓存+占位符 | `cached_image.dart`：内存→磁盘→网络两级；Windows `%LOCALAPPDATA%\Chord\cache\images`、Android `filesDir/cache/images`（走 chord/file.storagePath）、Web 交浏览器缓存；加载中 spinner、失败断链图标 |
+| @自动补全 | Composer 输入 `@` 弹成员候选（过滤+最多5条），Enter/Tab/点击补全；服务器=全体成员，DM=对端+自己 |
+| 桌面托盘 | 核实 v1.2.2 已实现——"看不到"是 Windows 把新图标收进了托盘溢出区（^），非缺陷 |
+
+**注意**：改动 users 表（avatar_url）与消息引用（reply_to_id）都依赖后端二进制更新；
+线上后端若仍是 v1.1.3，需 `update.sh server`（见第十节线上状态）。
+
+---
 ---
 
 ## 五、踩坑记录（重要！避免重蹈）
@@ -236,6 +251,7 @@
     并在产物里 `grep` 校验实际注入值。
 21. **聊天记录顺序**：服务端 `ListMessages` 已把结果翻成时间正序返回（旧→新）；客户端 `_loadMessages` **不能再 reversed**，否则历史倒序（新消息在上）。UI 用 `ListView(reverse:true)`，列表末尾（最新）渲染在最下方。该 bug 自 MVP 就存在，因新消息走 WS 追加到末尾看似正常而长期未发现（v1.1.6 修复）。
 22. **Android release APK 连不上服务器**（v1.2.4 修复）：Flutter 模板的 `INTERNET` 权限只在 `debug/`、`profile/` 清单里，**`main/AndroidManifest.xml` 必须自己加** `<uses-permission android:name="android.permission.INTERNET"/>`，否则 release APK 完全断网；且 Android 9+ 默认禁明文 HTTP，服务器为 http:// 时必须加 `android:usesCleartextTraffic="true"`。两处叠加导致 v1.2.3 及之前的 APK 无法使用。附带修复：Android 上 `%APPDATA%`/`resolvedExecutable` 均不可用 → 登录态静默丢失；MainActivity 的 `chord/file` 通道新增 `storagePath` 方法返回 `filesDir`，storage_io 检测 Android 后走通道取路径。
+23. **条件导入的 Web 兜底文件缺函数会拖垮 io 版编译**：`image_cache_dir_web.dart` 必须实现与 io 版**完全相同**的函数签名（曾漏 `deleteCacheDir` 导致 io 版报 undefined）。另外 GDI/绘制的位图、`dart:io` 的 HttpClient 都不可在 Web 条件分支出现（`HttpClient` 属 dart:io，Web 下载用 `package:http`）。
 
 ---
 
