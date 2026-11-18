@@ -95,7 +95,7 @@ class _MemberTile extends StatelessWidget {
           opacity: dim ? 0.45 : 1,
           child: Row(
             children: [
-              Avatar(name: u.username, colorHex: u.avatarColor, size: 32, status: status),
+              Avatar(name: u.username, colorHex: u.avatarColor, imageUrl: u.avatarUrl, size: 32, status: status),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(

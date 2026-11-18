@@ -1,6 +1,8 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../cached_image.dart';
+
 import '../theme.dart';
 
 /// 轻量 Markdown 风格富文本：**粗体** *斜体* `行内代码` ```代码块``` @提及 URL
@@ -98,35 +100,20 @@ class RichTextSpan extends StatelessWidget {
               onTap: () => Navigator.of(context).pop(),
               child: InteractiveViewer(
                 maxScale: 5,
-                child: Image.network(url, fit: BoxFit.contain),
+                child: CachedImage(url: url, fit: BoxFit.contain),
               ),
             ),
           ),
         ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 320, maxHeight: 220),
-          child: Image.network(
-            url,
-            fit: BoxFit.contain,
-            loadingBuilder: (c, child, progress) =>
-                progress == null ? child : const SizedBox(
-                  width: 120, height: 60,
-                  child: Center(child: SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2)))),
-            errorBuilder: (_, __, ___) => Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(Icons.broken_image_outlined, size: 18, color: ChordColors.textMuted),
-                SizedBox(width: 6),
-                Text('图片加载失败', style: TextStyle(fontSize: 12, color: ChordColors.textMuted)),
-              ],
-            ),
-          ),
+        child: CachedImage(
+          url: url,
+          maxWidth: 320,
+          maxHeight: 220,
         ),
       ),
     );
   }
+
 
   List<InlineSpan> _parseInline(String s) {
     final spans = <InlineSpan>[];

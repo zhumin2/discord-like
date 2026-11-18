@@ -16,12 +16,13 @@ func NewID() string {
 }
 
 type User struct {
-	ID           string    `gorm:"type:char(36);primaryKey" json:"id"`
-	Username     string    `gorm:"size:32;not null;uniqueIndex:idx_user_disc,priority:1" json:"username"`
-	Discriminator string   `gorm:"type:char(4);not null;uniqueIndex:idx_user_disc,priority:2" json:"discriminator"`
-	PasswordHash string    `gorm:"size:100;not null" json:"-"`
-	AvatarColor  string    `gorm:"size:9;not null;default:#5865F2" json:"avatarColor"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID            string     `gorm:"type:char(36);primaryKey" json:"id"`
+	Username      string     `gorm:"size:32;not null;uniqueIndex:idx_user_disc,priority:1" json:"username"`
+	Discriminator string     `gorm:"type:char(4);not null;uniqueIndex:idx_user_disc,priority:2" json:"discriminator"`
+	PasswordHash  string     `gorm:"size:100;not null" json:"-"`
+	AvatarColor   string     `gorm:"size:9;not null;default:#5865F2" json:"avatarColor"`
+	AvatarURL     string     `gorm:"size:255;not null;default:''" json:"avatarUrl"` // v1.3 自定义头像（相对 /uploads/ 或 http）
+	CreatedAt     time.Time  `json:"createdAt"`
 }
 
 func (u *User) Tag() string { return u.Username + "#" + u.Discriminator }
@@ -32,10 +33,12 @@ type UserDTO struct {
 	Username    string `json:"username"`
 	Discriminator string `json:"discriminator"`
 	AvatarColor string `json:"avatarColor"`
+	AvatarURL   string `json:"avatarUrl"`
 }
 
 func (u *User) DTO() UserDTO {
-	return UserDTO{ID: u.ID, Username: u.Username, Discriminator: u.Discriminator, AvatarColor: u.AvatarColor}
+	return UserDTO{ID: u.ID, Username: u.Username, Discriminator: u.Discriminator,
+		AvatarColor: u.AvatarColor, AvatarURL: u.AvatarURL}
 }
 
 type Guild struct {

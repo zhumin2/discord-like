@@ -123,7 +123,8 @@ class _MessageTileState extends State<MessageTile> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Avatar(name: m.author?.username ?? '?',
-                    colorHex: m.author?.avatarColor ?? '#5865F2'),
+                    colorHex: m.author?.avatarColor ?? '#5865F2',
+                    imageUrl: m.author?.avatarUrl),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(

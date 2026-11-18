@@ -23,11 +23,13 @@ class User {
   final String username;
   final String discriminator;
   final String avatarColor;
+  final String avatarUrl;
   const User({
     required this.id,
     required this.username,
     required this.discriminator,
     required this.avatarColor,
+    this.avatarUrl = '',
   });
 
   String get tag => '$username#$discriminator';
@@ -37,6 +39,7 @@ class User {
         username: j['username'] as String,
         discriminator: j['discriminator'] as String,
         avatarColor: j['avatarColor'] as String? ?? '#5865F2',
+        avatarUrl: j['avatarUrl'] as String? ?? '',
       );
 }
 

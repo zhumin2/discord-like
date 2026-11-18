@@ -11,7 +11,6 @@ import 'package:flutter/services.dart';
 class KeyValueStore {
   static const MethodChannel _channel = MethodChannel('chord/file');
   static String? _androidDir;
-  static Map<String, String>? _cache; // Windows 进程内缓存
 
   static bool get _isAndroid => Platform.isAndroid;
 

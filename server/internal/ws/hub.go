@@ -28,6 +28,7 @@ const (
 	EvMemberLeft      = "MEMBER_LEFT"
 	EvGuildDeleted    = "GUILD_DELETED"
 	EvDMCreated       = "DM_CREATED"
+	EvUserUpdate      = "USER_UPDATE"
 )
 
 // Envelope 是发往客户端的事件信封。

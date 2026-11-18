@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/avatar.dart';
+import '../image_compress.dart';
+import '../file_picker.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import 'avatar.dart';
@@ -466,4 +469,182 @@ Future<void> showUserSearchDialog(BuildContext context) async {
       ),
     ),
   );
+}
+
+/// 个人资料设置：改名 / 换头像颜色 / 上传头像图片。
+Future<void> showProfileSettingsDialog(BuildContext context) async {
+  await showDialog(context: context, builder: (ctx) => const _ProfileSettingsDialog());
+}
+
+class _ProfileSettingsDialog extends ConsumerStatefulWidget {
+  const _ProfileSettingsDialog();
+
+  @override
+  ConsumerState<_ProfileSettingsDialog> createState() => _ProfileSettingsDialogState();
+}
+
+class _ProfileSettingsDialogState extends ConsumerState<_ProfileSettingsDialog> {
+  late final TextEditingController _nameCtl =
+      TextEditingController(text: ref.watch(chatProvider).me?.username ?? '');
+  String _color = '';
+  String? _avatarUrl; // 本地预览（上传后）；null = 未改动
+  bool _busy = false;
+  String? _err;
+
+  static const palette = [
+    '#5865F2', '#3BA55D', '#FAA61A', '#ED4245', '#EB459E',
+    '#9B59B6', '#3498DB', '#1ABC9C', '#E67E22', '#7289DA',
+  ];
+
+  @override
+  void dispose() {
+    _nameCtl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    final picked = await pickFile(imagesOnly: true);
+    if (picked == null) return;
+    setState(() => _busy = true);
+    try {
+      final ready = await compressImageIfNeeded(picked.bytes, picked.name);
+      final url = await ref.read(apiProvider)!.upload(ready.bytes, ready.name);
+      setState(() => _avatarUrl = url); // 仅预览，保存时 PATCH
+    } catch (e) {
+      setState(() => _err = '头像上传失败：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _save() async {
+    final name = _nameCtl.text.trim();
+    if (name.isEmpty) {
+      setState(() => _err = '用户名不能为空');
+      return;
+    }
+    setState(() { _busy = true; _err = null; });
+    try {
+      final me = ref.read(chatProvider).me!;
+      final r = await ref.read(apiProvider)!.updateMe(
+        username: name == me.username ? null : name,
+        avatarColor: _color.isEmpty ? null : _color,
+        avatarUrl: _avatarUrl, // null = 不改；'' = 清除自定义头像
+      );
+      ref.read(chatProvider.notifier).applyMe(r);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      setState(() { _err = '$e'; _busy = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final me = ref.watch(chatProvider).me;
+    final base = ref.watch(serverBaseProvider);
+    final previewUrl = _avatarUrl ?? me?.avatarUrl ?? '';
+    final previewColor = _color.isNotEmpty ? _color : (me?.avatarColor ?? '#5865F2');
+    final avatarWidget = (previewUrl.isNotEmpty)
+        ? ClipOval(
+            child: Image.network(
+              previewUrl.startsWith('http') ? previewUrl : base + previewUrl,
+              width: 72, height: 72, fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                width: 72, height: 72, color: ChordColors.blurple,
+                alignment: Alignment.center,
+                child: Text(_nameCtl.text.isEmpty ? '?' : _nameCtl.text.characters.first,
+                    style: const TextStyle(color: Colors.white, fontSize: 30)),
+              ),
+            ),
+          )
+        : Avatar(name: _nameCtl.text.isEmpty ? '?' : _nameCtl.text,
+                 colorHex: previewColor, size: 72);
+
+    return AlertDialog(
+      backgroundColor: ChordColors.bgDarker,
+      title: const Text('个人资料'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Stack(children: [
+                avatarWidget,
+                Positioned(
+                  right: 0, bottom: 0,
+                  child: InkWell(
+                    onTap: _busy ? null : _pickAvatar,
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: ChordColors.blurple,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: ChordColors.bgDarker, width: 2),
+                      ),
+                      child: const Icon(Icons.photo_camera, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 14),
+            const Text('用户名',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ChordColors.textMuted)),
+            const SizedBox(height: 6),
+            TextField(controller: _nameCtl),
+            const SizedBox(height: 12),
+            const Text('头像颜色',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ChordColors.textMuted)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8, runSpacing: 8,
+              children: [
+                for (final c in palette)
+                  InkWell(
+                    onTap: () => setState(() => _color = c),
+                    child: Container(
+                      width: 26, height: 26,
+                      decoration: BoxDecoration(
+                        color: Color(int.parse(c.replaceFirst('#', '0xFF'))),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _color == c ? Colors.white : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                // 清除自定义头像（回到纯色）
+                if (me?.avatarUrl != null && me!.avatarUrl.isNotEmpty)
+                  InkWell(
+                    onTap: () => setState(() => _avatarUrl = ''),
+                    child: Container(
+                      width: 26, height: 26,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: ChordColors.textMuted, width: 1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.no_photography, size: 13, color: ChordColors.textMuted),
+                    ),
+                  ),
+              ],
+            ),
+            if (_err != null) ...[
+              const SizedBox(height: 10),
+              Text(_err!, style: const TextStyle(color: ChordColors.red, fontSize: 13)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: Text(_busy ? '保存中…' : '保存'),
+        ),
+      ],
+    );
+  }
 }

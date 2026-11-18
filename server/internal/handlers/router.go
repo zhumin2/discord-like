@@ -37,6 +37,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 		authed := api.Group("", auth.Middleware(s.Cfg.JWTSecret))
 		{
 			authed.GET("/users/me", s.Me)
+			authed.PATCH("/users/me", s.UpdateMe)
 			authed.GET("/users/search", s.SearchUsers)
 
 			authed.POST("/upload", s.limitUser(30, time.Minute, "upload"), s.Upload)

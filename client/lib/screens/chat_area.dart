@@ -46,6 +46,22 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
     super.dispose();
   }
 
+  /// @ 自动补全候选来源：服务器 = 全体成员；DM = 对端 + 自己。
+  List<String> _mentionNames(ChatState chat) {
+    if (widget.isDM) {
+      final dm = chat.dms.firstWhereOrNull((d) => d.id == widget.channelId);
+      return [
+        if (dm != null) dm.other.username,
+        if (chat.me != null) chat.me!.username,
+      ];
+    }
+    final gid = chat.guildId;
+    if (gid == null) return const [];
+    return (chat.members[gid] ?? const <MemberInfo>[])
+        .map((m) => m.user.username)
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final chat = ref.watch(chatProvider);
@@ -199,6 +215,7 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
         Composer(
           channelName: title.replaceFirst('#', ''),
           isDM: widget.isDM,
+          memberNames: _mentionNames(chat),
           replyAuthor: _replyTo?.author?.username,
           replySnippet: _replyTo?.content,
           replyColor: _replyTo == null ? null : _hexColor(_replyTo!.author?.avatarColor),

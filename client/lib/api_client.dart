@@ -90,6 +90,13 @@ class ApiClient {
 
   Future<User> me() async => User.fromJson(await _call('GET', '/users/me'));
 
+  Future<User> updateMe({String? username, String? avatarColor, String? avatarUrl}) async =>
+      User.fromJson(await _call('PATCH', '/users/me', body: {
+        if (username != null) 'username': username,
+        if (avatarColor != null) 'avatarColor': avatarColor,
+        if (avatarUrl != null) 'avatarUrl': avatarUrl,
+      }));
+
   Future<List<Map<String, dynamic>>> searchUsers(String q) async {
     final r = await _call('GET', '/users/search', q: {'q': q});
     return (r as List).cast<Map<String, dynamic>>();

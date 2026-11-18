@@ -621,6 +621,21 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
+  /// 本机修改个人资料后，把新资料写回状态（me / 成员列表 / 私信对端）。
+  void applyMe(User newMe) {
+    if (state.me == null) return;
+    state = state.copyWith(me: newMe);
+    // 成员列表里同步自己
+    final members = <String, List<MemberInfo>>{};
+    for (final e in state.members.entries) {
+      members[e.key] = e.value
+          .map((m) => m.user.id == newMe.id ? MemberInfo(user: newMe, status: m.status) : m)
+          .toList();
+    }
+    // 私信对端是自己（理论上不存在，防御）
+    state = state.copyWith(members: members);
+  }
+
   void clearError() => state = state.copyWith(clearError: true);
 
   // ---------- WS 事件处理 ----------
@@ -739,6 +754,24 @@ class ChatNotifier extends Notifier<ChatState> {
         if (!state.dms.any((x) => x.id == dm.id)) {
           state = state.copyWith(dms: [dm, ...state.dms]);
         }
+      case 'USER_UPDATE':
+        // 某成员改了名字/头像：更新成员列表、私信对端、以及历史消息里的作者引用
+        final d = ev.d as Map<String, dynamic>;
+        final u = User.fromJson(d['user']);
+        final members = <String, List<MemberInfo>>{};
+        for (final e in state.members.entries) {
+          members[e.key] = e.value
+              .map((m) => m.user.id == u.id ? MemberInfo(user: u, status: m.status) : m)
+              .toList();
+        }
+        final dms = state.dms
+            .map((d0) => d0.other.id == u.id
+                ? DMSession(id: d0.id, other: u, lastMessageId: d0.lastMessageId)
+                : d0)
+            .toList();
+        var me = state.me;
+        if (state.me?.id == u.id) me = u;
+        state = state.copyWith(members: members, dms: dms, me: me);
     }
   }
 }

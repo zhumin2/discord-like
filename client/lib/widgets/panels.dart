@@ -367,9 +367,16 @@ class _UserBar extends ConsumerWidget {
       color: ChordColors.bgDarkest,
       child: Row(
         children: [
+          // 点击自己的头像/名字打开个人资料设置
+          Expanded(
+            child: InkWell(
+              onTap: () => showProfileSettingsDialog(context),
+              child: Row(
+                children: [
           Avatar(
             name: me?.username ?? '?',
             colorHex: me?.avatarColor ?? '#5865F2',
+            imageUrl: me?.avatarUrl,
             size: 32,
             status: 'online',
           ),
@@ -386,6 +393,10 @@ class _UserBar extends ConsumerWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 10.5, color: ChordColors.textMuted)),
               ],
+            ),
+          ),
+                ],
+              ),
             ),
           ),
           IconButton(
@@ -511,6 +522,7 @@ class _DMTile extends ConsumerWidget {
             Avatar(
               name: dm.other.username,
               colorHex: dm.other.avatarColor,
+              imageUrl: dm.other.avatarUrl,
               size: 34,
               status: chat.presence[dm.other.id] ?? 'offline',
             ),

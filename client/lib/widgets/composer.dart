@@ -16,6 +16,8 @@ class Composer extends StatefulWidget {
   final String? replySnippet;
   final Color? replyColor;
   final VoidCallback? onCancelReply;
+  /// 频道成员名列表（@ 自动补全用）；空 = 不启用补全
+  final List<String> memberNames;
 
   const Composer({
     super.key,
@@ -28,6 +30,7 @@ class Composer extends StatefulWidget {
     this.replySnippet,
     this.replyColor,
     this.onCancelReply,
+    this.memberNames = const [],
   });
 
   @override
@@ -38,12 +41,60 @@ class _ComposerState extends State<Composer> {
   final _ctl = TextEditingController();
   final _keyFocus = FocusNode(); // 仅用于捕获按键，不参与输入焦点
   bool _sending = false;
+  List<String> _mentionCandidates = []; // @ 自动补全候选
+  String _mentionToken = ''; // 正在输入的 @partial
 
   @override
   void dispose() {
     _ctl.dispose();
     _keyFocus.dispose();
     super.dispose();
+  }
+
+  /// 检测光标前是否有未完成的 @提及，如有则填充候选。
+  void _updateMentionCandidates() {
+    final sel = _ctl.selection;
+    if (!sel.isValid || !sel.isCollapsed) {
+      _mentionCandidates = [];
+      return;
+    }
+    final pos = sel.baseOffset;
+    if (pos < 0 || pos > _ctl.text.length) {
+      _mentionCandidates = [];
+      return;
+    }
+    final before = _ctl.text.substring(0, pos);
+    final m = RegExp(r'@([^\s@]{0,20})$').firstMatch(before);
+    if (m == null) {
+      if (_mentionCandidates.isNotEmpty || _mentionToken.isNotEmpty) {
+        _mentionCandidates = [];
+        _mentionToken = '';
+      }
+      return;
+    }
+    _mentionToken = m.group(0)!; // 形如 "@he"
+    final typed = m.group(1)!.toLowerCase();
+    _mentionCandidates = widget.memberNames
+        .where((n) =>
+            n.toLowerCase().startsWith(typed) ||
+            n.toLowerCase().contains(typed))
+        .take(5)
+        .toList();
+  }
+
+  /// 用选中的成员名替换光标前的 @partial。
+  void _applyMention(String name) {
+    final sel = _ctl.selection;
+    final pos = sel.baseOffset;
+    if (pos < 0 || pos > _ctl.text.length) return;
+    final before = _ctl.text.substring(0, pos - _mentionToken.length);
+    final after = _ctl.text.substring(pos);
+    _ctl.text = '$before@$name $after';
+    _ctl.selection = TextSelection.fromPosition(
+        TextPosition(offset: before.length + name.length + 2));
+    _mentionCandidates = [];
+    _mentionToken = '';
+    widget.onTyping();
   }
 
   Future<void> _send() async {
@@ -88,6 +139,10 @@ class _ComposerState extends State<Composer> {
         event.logicalKey == LogicalKeyboardKey.enter &&
         !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.shiftLeft) &&
         !HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.shiftRight)) {
+      if (_mentionCandidates.isNotEmpty) {
+        _applyMention(_mentionCandidates.first);
+        return KeyEventResult.handled;
+      }
       _send();
       return KeyEventResult.handled;
     }
@@ -102,6 +157,7 @@ class _ComposerState extends State<Composer> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_mentionCandidates.isNotEmpty) _buildMentionList(),
           if (widget.replyAuthor != null) _buildReplyBar(),
           Container(
             decoration: BoxDecoration(
@@ -168,6 +224,7 @@ class _ComposerState extends State<Composer> {
                   ),
                   onChanged: (_) {
                     setState(() {}); // 刷新发送按钮可用态
+                    _updateMentionCandidates();
                     widget.onTyping();
                   },
                 ),
@@ -240,4 +297,43 @@ class _ComposerState extends State<Composer> {
       ),
     );
   }
-}
+
+  /// @ 自动补全候选列表（显示在输入框上方，最多 5 条）。
+  Widget _buildMentionList() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: ChordColors.bgDarker,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0x22FFFFFF)),
+      ),
+      child: Column(
+        children: [
+          for (final name in _mentionCandidates)
+            InkWell(
+              onTap: () => _applyMention(name),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                child: Row(
+                  children: [
+                    const Icon(Icons.alternate_email, size: 14, color: ChordColors.textMuted),
+                    const SizedBox(width: 8),
+                    Text(name,
+                        style: const TextStyle(
+                            fontSize: 13.5, color: ChordColors.textNormal)),
+                  ],
+                ),
+              ),
+            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(12, 2, 12, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Tab 或 Enter 选中',
+                  style: TextStyle(fontSize: 10.5, color: ChordColors.textMuted)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }}

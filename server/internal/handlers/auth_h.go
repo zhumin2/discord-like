@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"math/rand"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -10,6 +11,7 @@ import (
 	"chord/server/internal/auth"
 	"chord/server/internal/models"
 	"chord/server/internal/util"
+	"chord/server/internal/ws"
 )
 
 var avatarColors = []string{
@@ -117,6 +119,82 @@ func (s *Server) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(200, u.DTO())
+}
+
+type updateMeReq struct {
+	Username    *string `json:"username"`    // 2-20 位；同用户名不同编号允许共存
+	AvatarColor *string `json:"avatarColor"` // #RRGGBB
+	AvatarURL   *string `json:"avatarUrl"`   // /uploads/... 或 http(s)://
+}
+
+// UpdateMe 修改个人资料（v1.3）：用户名 / 头像颜色 / 头像图片。
+// 成功后向该用户所在的所有服务器与私信广播 USER_UPDATE。
+func (s *Server) UpdateMe(c *gin.Context) {
+	uid := auth.UserID(c)
+	var u models.User
+	if err := s.DB.Where("id = ?", uid).First(&u).Error; err != nil {
+		fail(c, 404, "用户不存在")
+		return
+	}
+	var req updateMeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, "参数错误")
+		return
+	}
+	updates := map[string]any{}
+	if req.Username != nil {
+		name := strings.TrimSpace(*req.Username)
+		if !validUsername(name) {
+			fail(c, 400, "用户名需为 2-20 位字母、数字、下划线或连字符")
+			return
+		}
+		updates["username"] = name
+	}
+	if req.AvatarColor != nil {
+		colorVal := strings.TrimSpace(*req.AvatarColor)
+		if !regexp.MustCompile(`^#[0-9a-fA-F]{6}$`).MatchString(colorVal) {
+			fail(c, 400, "颜色格式需为 #RRGGBB")
+			return
+		}
+		updates["avatar_color"] = colorVal
+	}
+	if req.AvatarURL != nil {
+		url := strings.TrimSpace(*req.AvatarURL)
+		if url != "" && !(strings.HasPrefix(url, "/uploads/") ||
+			strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) {
+			fail(c, 400, "头像地址无效")
+			return
+		}
+		if len(url) > 255 {
+			fail(c, 400, "头像地址过长")
+			return
+		}
+		updates["avatar_url"] = url
+	}
+	if len(updates) == 0 {
+		fail(c, 400, "没有需要修改的字段")
+		return
+	}
+	if err := s.DB.Model(&u).Updates(updates).Error; err != nil {
+		fail(c, 500, "修改失败")
+		return
+	}
+	s.DB.Where("id = ?", uid).First(&u)
+	dto := u.DTO()
+	// 通知所有能看到该用户的人：所在服务器 + 私信对端 + 自己的其他端
+	env := ws.NewEnvelope(ws.EvUserUpdate, map[string]any{"user": dto})
+	var guildIDs []string
+	s.DB.Model(&models.GuildMember{}).Where("user_id = ?", uid).Pluck("guild_id", &guildIDs)
+	for _, gid := range guildIDs {
+		s.Hub.Broadcast("guild:"+gid, env)
+	}
+	var dmIDs []string
+	s.DB.Model(&models.DMChannel{}).Where("user_a_id = ? OR user_b_id = ?", uid, uid).Pluck("id", &dmIDs)
+	for _, id := range dmIDs {
+		s.Hub.Broadcast("dm:"+id, env)
+	}
+	s.Hub.Broadcast("user:"+uid, env)
+	c.JSON(200, dto)
 }
 
 type userResult struct {

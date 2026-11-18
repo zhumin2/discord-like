@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../state/app_state.dart';
 import '../theme.dart';
+import '../cached_image.dart';
 
-/// 首字母圆形头像（用用户名与颜色哈希，无需图片上传）。
-class Avatar extends StatelessWidget {
+/// 圆形头像：优先显示 [imageUrl]（自定义图片，经服务器地址解析 + 磁盘缓存），
+/// 否则显示首字母 + [colorHex] 颜色。[status] 非空时叠加在线状态点。
+class Avatar extends ConsumerWidget {
   final String name;
   final String colorHex;
   final double size;
   final String? status; // online / idle / offline / null(不显示)
+  final String? imageUrl; // 相对路径（/uploads/...）或完整 URL
 
   const Avatar({
     super.key,
@@ -15,6 +20,7 @@ class Avatar extends StatelessWidget {
     required this.colorHex,
     this.size = 40,
     this.status,
+    this.imageUrl,
   });
 
   Color get _color {
@@ -32,30 +38,47 @@ class Avatar extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) {
-    final initial = name.isEmpty ? '?' : name.characters.first.toUpperCase();
-    final avatar = Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(color: _color, shape: BoxShape.circle),
-      child: Text(
-        initial,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: size * 0.42,
-          fontWeight: FontWeight.w600,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final base = ref.watch(serverBaseProvider);
+    final url = (imageUrl != null && imageUrl!.isNotEmpty)
+        ? (imageUrl!.startsWith('http') ? imageUrl! : base + imageUrl!)
+        : null;
+
+    Widget inner;
+    if (url != null) {
+      inner = ClipOval(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: CachedImage(url: url, fit: BoxFit.cover),
         ),
-      ),
-    );
-    if (status == null) return avatar;
+      );
+    } else {
+      final initial = name.isEmpty ? '?' : name.characters.first.toUpperCase();
+      inner = Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: _color, shape: BoxShape.circle),
+        child: Text(
+          initial,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: size * 0.42,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+
+    if (status == null) return inner;
     return SizedBox(
       width: size,
       height: size,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          avatar,
+          inner,
           Positioned(
             right: -2,
             bottom: -2,
