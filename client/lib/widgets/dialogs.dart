@@ -647,7 +647,15 @@ class _ProfileSettingsDialogState extends ConsumerState<_ProfileSettingsDialog> 
     if (picked == null) return;
     setState(() => _busy = true);
     try {
-      final ready = await compressImageIfNeeded(picked.bytes, picked.name);
+      // 头像按头像尺寸压缩：显示最大 ~80px，320px 足够高清屏；质量 88。
+      // 手机拍的原图动辄几 MB，跨境上传很慢，而头像只用到几十 KB。
+      final ready = await compressImageIfNeeded(
+        picked.bytes,
+        picked.name,
+        maxDim: 320,
+        quality: 88,
+        minBytes: 60 * 1024,
+      );
       final url = await ref.read(apiProvider)!.upload(ready.bytes, ready.name);
       setState(() => _avatarUrl = url); // 仅预览，保存时 PATCH
     } catch (e) {

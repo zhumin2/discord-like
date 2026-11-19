@@ -53,4 +53,22 @@ void main() {
     expect(d.numChannels, 4);
     print('透明 PNG: ${(png.length/1024).toStringAsFixed(0)}KB → ${(o2.bytes.length/1024).toStringAsFixed(0)}KB');
   });
+
+  test('头像参数：大图缩到 320 长边且 <100KB', () async {
+    final rnd = Random(7);
+    final im = img.Image(width: 2000, height: 1500);
+    for (var y = 0; y < im.height; y += 2) {
+      for (var x = 0; x < im.width; x += 2) {
+        im.setPixelRgb(x, y, rnd.nextInt(256), rnd.nextInt(256), rnd.nextInt(256));
+      }
+    }
+    final jpg = Uint8List.fromList(img.encodeJpg(im, quality: 95));
+    final out = await compressImageIfNeeded(jpg, 'avatar.jpg',
+        maxDim: 320, quality: 88, minBytes: 60 * 1024);
+    final d = img.decodeImage(out.bytes)!;
+    print('头像: ${(jpg.length/1024).toStringAsFixed(0)}KB (2000x1500) → '
+        '${(out.bytes.length/1024).toStringAsFixed(1)}KB (${d.width}x${d.height})');
+    expect(d.width, 320);
+    expect(out.bytes.length, lessThan(100 * 1024));
+  });
 }
