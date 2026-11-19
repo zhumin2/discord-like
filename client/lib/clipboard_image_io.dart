@@ -50,3 +50,23 @@ Future<bool> copyImageToClipboard(Uint8List bytes) async {
     return false;
   }
 }
+
+/// 主动读取系统剪贴板里的图片（Windows）；返回 PNG 字节，没有图片返回 null。
+/// 作为 Ctrl+V 的兜底路径：键盘焦点在 Flutter 子窗口时，顶层窗口收不到 WM_KEYDOWN。
+Future<Uint8List?> readClipboardImage() async {
+  if (!Platform.isWindows) return null;
+  try {
+    final args = await _ch.invokeMethod<Map>('readClipboardImage');
+    if (args == null) return null;
+    final rgba = args['data'] as Uint8List?;
+    final w = args['width'] as int? ?? 0;
+    final h = args['height'] as int? ?? 0;
+    if (rgba == null || rgba.isEmpty || w <= 0 || h <= 0) return null;
+    final image = img.Image.fromBytes(
+      width: w, height: h, bytes: rgba.buffer, numChannels: 4,
+    );
+    return Uint8List.fromList(img.encodePng(image));
+  } catch (_) {
+    return null;
+  }
+}

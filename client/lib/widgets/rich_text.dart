@@ -93,15 +93,10 @@ class RichTextSpan extends StatelessWidget {
   Widget _imageWidget(String url, BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: GestureDetector(
-        onTap: () => _openImage(context, url),
-        // 右键菜单：查看大图 / 复制图片（v 反馈 1）
-        onSecondaryTapDown: (d) => _imageMenu(context, url, d.globalPosition),
-        child: CachedImage(
-          url: url,
-          maxWidth: 320,
-          maxHeight: 220,
-        ),
+      child: _ImageBubble(
+        url: url,
+        onOpen: () => _openImage(context, url),
+        onCopy: () => _copyImage(context, url),
       ),
     );
   }
@@ -123,35 +118,14 @@ class RichTextSpan extends StatelessWidget {
     );
   }
 
-  Future<void> _imageMenu(BuildContext context, String url, Offset position) async {
-    final box = Overlay.of(context).context.findRenderObject() as RenderBox?;
-    final action = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        box == null ? 0 : box.size.width - position.dx,
-        box == null ? 0 : box.size.height - position.dy,
-      ),
-      color: ChordColors.bgModal,
-      items: const [
-        PopupMenuItem(value: 'open', height: 40, child: Text('查看大图', style: TextStyle(fontSize: 13.5))),
-        PopupMenuItem(value: 'copy', height: 40, child: Text('复制图片', style: TextStyle(fontSize: 13.5))),
-      ],
-    );
+  Future<void> _copyImage(BuildContext context, String url) async {
+    final bytes = await loadImageBytes(url);
+    final ok = bytes != null && await copyImageToClipboard(bytes);
     if (!context.mounted) return;
-    if (action == 'open') {
-      _openImage(context, url);
-    } else if (action == 'copy') {
-      final bytes = await loadImageBytes(url);
-      final ok = bytes != null && await copyImageToClipboard(bytes);
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ok ? '图片已复制' : '当前平台不支持复制图片',
-              style: const TextStyle(fontSize: 13))));
-    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok ? '图片已复制' : '当前平台不支持复制图片',
+            style: const TextStyle(fontSize: 13))));
   }
-
 
   List<InlineSpan> _parseInline(String s) {
     final spans = <InlineSpan>[];
@@ -214,5 +188,91 @@ class RichTextSpan extends StatelessWidget {
     }
     if (cursor < s.length) spans.add(TextSpan(text: s.substring(cursor)));
     return spans;
+  }
+}
+
+/// 消息里的图片：点击看大图；鼠标悬停出现「复制图片 / 查看大图」小按钮
+/// （Windows/桌面右键可能被 SelectionArea 吞掉，悬停按钮是可靠入口）；
+/// 右键仍尝试弹菜单。
+class _ImageBubble extends StatefulWidget {
+  final String url;
+  final VoidCallback onOpen;
+  final VoidCallback onCopy;
+  const _ImageBubble({required this.url, required this.onOpen, required this.onCopy});
+
+  @override
+  State<_ImageBubble> createState() => _ImageBubbleState();
+}
+
+class _ImageBubbleState extends State<_ImageBubble> {
+  bool _hover = false;
+
+  Future<void> _menu(BuildContext context, Offset pos) async {
+    final box = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        pos.dx,
+        pos.dy,
+        box == null ? 0 : box.size.width - pos.dx,
+        box == null ? 0 : box.size.height - pos.dy,
+      ),
+      color: ChordColors.bgModal,
+      items: const [
+        PopupMenuItem(
+            value: 'copy', height: 40,
+            child: Text('复制图片', style: TextStyle(fontSize: 13.5))),
+        PopupMenuItem(
+            value: 'open', height: 40,
+            child: Text('查看大图', style: TextStyle(fontSize: 13.5))),
+      ],
+    );
+    if (action == 'copy') widget.onCopy();
+    if (action == 'open') widget.onOpen();
+  }
+
+  Widget _mini(IconData icon, String tip, VoidCallback onTap) => Tooltip(
+        message: tip,
+        child: Material(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(4),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Icon(icon, size: 15, color: Colors.white),
+            ),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onOpen,
+        onSecondaryTapDown: (d) => _menu(context, d.globalPosition),
+        child: Stack(
+          children: [
+            CachedImage(url: widget.url, maxWidth: 320, maxHeight: 220),
+            if (_hover)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Row(
+                  children: [
+                    _mini(Icons.copy, '复制图片', widget.onCopy),
+                    const SizedBox(width: 4),
+                    _mini(Icons.open_in_full, '查看大图', widget.onOpen),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }

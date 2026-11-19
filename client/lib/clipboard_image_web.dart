@@ -56,3 +56,7 @@ Future<bool> copyImageToClipboard(Uint8List bytes) async {
     return false;
   }
 }
+
+/// Web 上不支持主动读取剪贴板图片（浏览器安全限制），返回 null。
+/// 粘贴由 index.html 的 paste 监听完成后台 bridge 送达。
+Future<Uint8List?> readClipboardImage() async => null;

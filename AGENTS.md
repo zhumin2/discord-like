@@ -330,7 +330,14 @@ UI 层（无头 Edge）新建频道只出现 1 次、受限频道显示锁定条
 28. **`SelectionArea` 上右键会清空选区**，默认工具条因此"点了就没了"。跨消息复制的可靠做法：
     `SelectionArea(onSelectionChanged:)` 记录选中文本，选区非空时显示**固定位置的浮动
     「复制所选」按钮**（不随鼠标移动消失），右键菜单只作为补充。
-
+29. **顶层窗口收不到 WM_KEYDOWN（Windows 粘贴失效的根因）**：Flutter 的视图是子 HWND，
+    键盘焦点在子窗口上，`FlutterWindow::MessageHandler` 的 `WM_KEYDOWN` 分支收不到；
+    而且 `HandleTopLevelWindowProc` 在 switch 之前返回，会把键盘消息吃掉（v1.3.5 就是这样）。
+    现在三层兜底：① Composer 的 `Focus.onKeyEvent` 检到 Ctrl+V → `readClipboardImage`
+    主动向原生要剪贴板图；② 原生 WM_KEYDOWN 判断前移到 `HandleTopLevelWindowProc` 之前；
+    ③ 桌面端输入框旁提供显式「粘贴图片」按钮（不依赖键盘/右键）。两条路径用
+    「字节数 + 2 秒」去重，避免同一次 Ctrl+V 触发两次。
+    原生 DIB 读写可用独立 C++ 测试验证（`clipboard_image.cpp` + 手工构造 RGBA 往返）。
 ---
 
 ## 六、线上运行事实（服务器 129.226.159.168）

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -49,6 +50,8 @@ class _ComposerState extends State<Composer> {
   bool _sending = false; // 消息发送中（发送键转圈，防连发）
   bool _uploading = false; // 附件上传中（附件键转圈）
   Unregister? _unregisterPaste; // 剪贴板图片监听（Web/Windows）
+  int _lastPasteLen = -1; // 最近一次粘贴的图片字节数（原生推送 + Dart 主动拉取去重）
+  DateTime _lastPasteAt = DateTime.fromMillisecondsSinceEpoch(0);
   List<String> _mentionCandidates = []; // @ 自动补全候选
   String _mentionToken = ''; // 正在输入的 @partial
 
@@ -69,10 +72,25 @@ class _ComposerState extends State<Composer> {
     super.dispose();
   }
 
+  /// Ctrl+V 时主动读系统剪贴板（Windows 专用；Web 返回 null 由 JS 监听负责）。
+  Future<void> _pasteFromSystemClipboard() async {
+    final bytes = await readClipboardImage();
+    if (bytes == null) return;
+    await _insertPastedImage(bytes, 'image/png');
+  }
+
   /// 粘贴的图片走附件管线（压缩→上传），把返回的 Markdown 追加到输入框。
   Future<void> _insertPastedImage(Uint8List bytes, String mime) async {
     final fn = widget.onPasteImage;
     if (fn == null || _uploading) return;
+    // 去重：原生 WM_KEYDOWN 推送与 Dart 主动拉取可能同时/先后触发同一次 Ctrl+V
+    final now = DateTime.now();
+    if (bytes.length == _lastPasteLen &&
+        now.difference(_lastPasteAt).inMilliseconds < 2000) {
+      return;
+    }
+    _lastPasteLen = bytes.length;
+    _lastPasteAt = now;
     setState(() => _uploading = true);
     String? insert;
     try {
@@ -184,6 +202,16 @@ class _ComposerState extends State<Composer> {
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    // Ctrl+V：主动向系统要剪贴板图片（Windows）。
+    // 顶层窗口的 WM_KEYDOWN 可能收不到（焦点在 Flutter 子窗口），这是兜底路径；
+    // 原生推送与这里的结果会按「字节数 + 2 秒窗口」去重。不 handled，文本粘贴照常。
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.keyV &&
+        (HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed) &&
+        widget.onPasteImage != null) {
+      _pasteFromSystemClipboard();
+    }
     // 桌面/Web：无 Shift 修饰的 Enter 发送，Shift+Enter 换行
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.enter &&
@@ -231,6 +259,21 @@ class _ComposerState extends State<Composer> {
                           color: ChordColors.textMuted, size: 22),
                   onPressed: (_sending || _uploading) ? null : _attach,
                 ),
+              ),
+            // 桌面端显式「粘贴图片」入口：不依赖 Ctrl+V 拦截（顶层窗口可能收不到
+            // 键盘消息，见 AGENTS 坑 29），点一下就直接读系统剪贴板
+            if (widget.onPasteImage != null &&
+                !kIsWeb &&
+                defaultTargetPlatform != TargetPlatform.android)
+              IconButton(
+                tooltip: '粘贴图片',
+                icon: _uploading
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.content_paste,
+                        color: ChordColors.textMuted, size: 20),
+                onPressed: (_sending || _uploading) ? null : _pasteFromSystemClipboard,
               ),
             PopupMenuButton<String>(
               tooltip: '表情',

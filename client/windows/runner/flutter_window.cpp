@@ -51,6 +51,22 @@ static void RegisterFileChannel(flutter::FlutterEngine* engine) {
           result->Success(flutter::EncodableValue(ok));
           return;
         }
+        // Dart → 原生：主动读取剪贴板图片（Ctrl+V 时由 Dart 侧触发，作为
+        // WM_KEYDOWN 的兜底——键盘焦点在 Flutter 子窗口时顶层窗口收不到按键）
+        if (call.method_name() == "readClipboardImage") {
+          std::vector<uint8_t> rgba;
+          int w = 0, h = 0;
+          if (!clipboard_image::ReadClipboardRgba(&rgba, &w, &h) || w <= 0 || h <= 0) {
+            result->Success(nullptr);  // 剪贴板里没有图片
+            return;
+          }
+          flutter::EncodableMap payload;
+          payload[flutter::EncodableValue("data")] = flutter::EncodableValue(rgba);
+          payload[flutter::EncodableValue("width")] = flutter::EncodableValue(w);
+          payload[flutter::EncodableValue("height")] = flutter::EncodableValue(h);
+          result->Success(flutter::EncodableValue(payload));
+          return;
+        }
         if (call.method_name() != "pickFile") {
           result->NotImplemented();
           return;
@@ -182,6 +198,24 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Ctrl+V 且剪贴板为图片 → 主动回调 Dart（onClipboardImage）。
+  // 必须在 HandleTopLevelWindowProc 之前：Flutter 会处理（并返回）键盘消息，
+  // 放到 switch 里永远收不到（v1.3.5 的 bug）。这里只旁路读取，不吞按键。
+  if (message == WM_KEYDOWN && wparam == 'V' &&
+      (GetKeyState(VK_CONTROL) & 0x8000) != 0 && g_file_channel != nullptr) {
+    std::vector<uint8_t> rgba;
+    int w = 0, h = 0;
+    if (clipboard_image::ReadClipboardRgba(&rgba, &w, &h) && w > 0 && h > 0) {
+      flutter::EncodableMap payload;
+      payload[flutter::EncodableValue("data")] = flutter::EncodableValue(rgba);
+      payload[flutter::EncodableValue("width")] = flutter::EncodableValue(w);
+      payload[flutter::EncodableValue("height")] = flutter::EncodableValue(h);
+      g_file_channel->InvokeMethod(
+          "onClipboardImage",
+          std::make_unique<flutter::EncodableValue>(payload));
+    }
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
@@ -193,25 +227,6 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
-    case WM_KEYDOWN: {
-      // Ctrl+V 且剪贴板为图片 → 主动回调 Dart（onClipboardImage）。
-      // 不吞掉按键：Flutter 仍会收到 V，文字粘贴照常。
-      if (wparam == 'V' && (GetKeyState(VK_CONTROL) & 0x8000) != 0 &&
-          g_file_channel != nullptr) {
-        std::vector<uint8_t> rgba;
-        int w = 0, h = 0;
-        if (clipboard_image::ReadClipboardRgba(&rgba, &w, &h) && w > 0 && h > 0) {
-          flutter::EncodableMap payload;
-          payload[flutter::EncodableValue("data")] = flutter::EncodableValue(rgba);
-          payload[flutter::EncodableValue("width")] = flutter::EncodableValue(w);
-          payload[flutter::EncodableValue("height")] = flutter::EncodableValue(h);
-          g_file_channel->InvokeMethod(
-              "onClipboardImage",
-              std::make_unique<flutter::EncodableValue>(payload));
-        }
-      }
-      break;
-    }
     case WM_CLOSE:
       // 点 X：隐藏到系统托盘而不是退出（托盘菜单「退出」才真正关闭）
       tray_.HideWindowToTray(hwnd);
