@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -63,6 +64,79 @@ type Channel struct {
 	Category  string    `gorm:"size:32;not null;default:''" json:"category"`
 	Position  int       `gorm:"not null;default:0" json:"position"`
 	CreatedAt time.Time `json:"createdAt"`
+
+	// v1.3.5 频道发言权限
+	CreatedBy       string `gorm:"type:char(36);not null;default:''" json:"createdBy"`          // 创建者（可管理频道）
+	SpeakMode       string `gorm:"size:16;not null;default:'all'" json:"speakMode"`             // all|owner|custom|none
+	AllowedSpeakers string `gorm:"type:text" json:"-"`                                          // custom 模式允许的 userID，逗号分隔
+}
+
+// SpeakMode 常量
+const (
+	SpeakAll    = "all"    // 所有成员
+	SpeakOwner  = "owner"  // 仅频道创建者（公告频道）
+	SpeakCustom = "custom" // 创建者 + 指定成员
+	SpeakNone   = "none"   // 无人（归档）
+)
+
+// AllowedSpeakerList 把逗号分隔存储解析为列表。
+func (ch *Channel) AllowedSpeakerList() []string {
+	out := []string{}
+	for _, s := range strings.Split(ch.AllowedSpeakers, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// SetAllowedSpeakers 用列表生成逗号分隔存储（去重）。
+func (ch *Channel) SetAllowedSpeakers(ids []string) {
+	seen := map[string]bool{}
+	kept := []string{}
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			kept = append(kept, id)
+		}
+	}
+	ch.AllowedSpeakers = strings.Join(kept, ",")
+}
+
+// CanSpeak 判断 uid 能否在该频道发言。guildOwnerID 恒可发言（管理兜底）。
+func (ch *Channel) CanSpeak(uid, guildOwnerID string) bool {
+	if uid == guildOwnerID {
+		return true
+	}
+	switch ch.SpeakMode {
+	case SpeakAll:
+		return true
+	case SpeakOwner:
+		return uid == ch.CreatedBy
+	case SpeakCustom:
+		if uid == ch.CreatedBy {
+			return true
+		}
+		for _, id := range ch.AllowedSpeakerList() {
+			if id == uid {
+				return true
+			}
+		}
+		return false
+	case SpeakNone:
+		return false
+	}
+	return true
+}
+
+// DTO 输出给客户端的频道结构（allowedSpeakers 转成数组）。
+func (ch Channel) DTO() map[string]any {
+	return map[string]any{
+		"id": ch.ID, "guildId": ch.GuildID, "name": ch.Name, "category": ch.Category,
+		"position": ch.Position, "createdAt": ch.CreatedAt,
+		"createdBy": ch.CreatedBy, "speakMode": ch.SpeakMode,
+		"allowedSpeakers": ch.AllowedSpeakerList(),
+	}
 }
 
 // DMChannel 私信会话；UserAID 恒为较小 ID，保证 (a,b) 唯一。

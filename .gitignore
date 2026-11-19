@@ -40,3 +40,6 @@ discord-project.bundle
 # ===== Python =====
 __pycache__/
 *.pyc
+
+# 本地上传文件（go run 时落到 server/data/uploads）
+server/data/

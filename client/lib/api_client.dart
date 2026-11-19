@@ -118,10 +118,25 @@ class ApiClient {
       .map((e) => Channel.fromJson(e))
       .toList();
 
-  Future<Channel> createChannel(String guildId, String name, String category) async =>
-      Channel.fromJson(await _call('POST', '/guilds/$guildId/channels', body: {'name': name, 'category': category}));
+  Future<Channel> createChannel(String guildId, String name, String category,
+          {bool ownerOnly = false}) async =>
+      Channel.fromJson(await _call('POST', '/guilds/$guildId/channels',
+          body: {'name': name, 'category': category, 'ownerOnly': ownerOnly}));
+
+  Future<Channel> updateChannel(String channelId,
+      {String? name, String? category, String? speakMode, List<String>? allowedSpeakers}) async =>
+      Channel.fromJson(await _call('PATCH', '/channels/$channelId', body: {
+        if (name != null) 'name': name,
+        if (category != null) 'category': category,
+        if (speakMode != null) 'speakMode': speakMode,
+        if (allowedSpeakers != null) 'allowedSpeakers': allowedSpeakers,
+      }));
 
   Future<void> deleteChannel(String channelId) => _call('DELETE', '/channels/$channelId');
+
+  Future<void> changePassword(String oldPassword, String newPassword) =>
+      _call('PATCH', '/users/me/password',
+          body: {'oldPassword': oldPassword, 'newPassword': newPassword});
 
   Future<List<MemberInfo>> listMembers(String guildId) async => ((await _call('GET', '/guilds/$guildId/members')) as List)
       .map((e) => MemberInfo.fromJson(e))

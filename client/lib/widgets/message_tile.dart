@@ -261,6 +261,18 @@ class _MessageTileState extends State<MessageTile> {
             child: const Text('取消',
                 style: TextStyle(color: ChordColors.textMuted)),
           ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: ChordColors.blurple,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              minimumSize: const Size(0, 34),
+            ),
+            onPressed: () {
+              widget.onEdit(widget.msg.id, _editCtl.text);
+              setState(() => _editing = false);
+            },
+            child: const Text('确定', style: TextStyle(fontSize: 13)),
+          ),
         ],
       ),
     );

@@ -193,6 +193,19 @@ func (s *Server) SendMessage(c *gin.Context) {
 		fail(c, 403, "无权访问该频道")
 		return
 	}
+	// 频道消息：校验发言权限（公告/静音频道普通成员不可发；DM 不限）
+	if strings.HasPrefix(topic, "guild:") {
+		var ch models.Channel
+		if err := s.DB.Where("id = ?", cid).First(&ch).Error; err == nil {
+			var g models.Guild
+			if err := s.DB.Where("id = ?", ch.GuildID).First(&g).Error; err == nil {
+				if !ch.CanSpeak(uid, g.OwnerID) {
+					fail(c, 403, "该频道仅特定成员可发言")
+					return
+				}
+			}
+		}
+	}
 	var req sendMsgReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, 400, "参数错误")

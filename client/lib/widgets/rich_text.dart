@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../cached_image.dart';
+import '../clipboard_image.dart';
 
 import '../theme.dart';
 
@@ -26,7 +27,9 @@ class RichTextSpan extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SelectableText.rich(
+    // 选择由外层 SelectionArea 统一提供（支持跨多条消息选择，v 反馈 9）；
+    // 这里用普通 Text，避免每条消息各自为政、右键菜单行为不一致。
+    return Text.rich(
       TextSpan(children: _parse(context)),
       style: baseStyle,
     );
@@ -91,20 +94,9 @@ class RichTextSpan extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: GestureDetector(
-        onTap: () => showDialog(
-          context: context,
-          barrierColor: Colors.black87,
-          builder: (_) => Dialog(
-            backgroundColor: Colors.transparent,
-            child: GestureDetector(
-              onTap: () => Navigator.of(context).pop(),
-              child: InteractiveViewer(
-                maxScale: 5,
-                child: CachedImage(url: url, fit: BoxFit.contain),
-              ),
-            ),
-          ),
-        ),
+        onTap: () => _openImage(context, url),
+        // 右键菜单：查看大图 / 复制图片（v 反馈 1）
+        onSecondaryTapDown: (d) => _imageMenu(context, url, d.globalPosition),
         child: CachedImage(
           url: url,
           maxWidth: 320,
@@ -114,6 +106,52 @@ class RichTextSpan extends StatelessWidget {
     );
   }
 
+  void _openImage(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GestureDetector(
+          onTap: () => Navigator.of(context).pop(),
+          child: InteractiveViewer(
+            maxScale: 5,
+            child: CachedImage(url: url, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _imageMenu(BuildContext context, String url, Offset position) async {
+    final box = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        box == null ? 0 : box.size.width - position.dx,
+        box == null ? 0 : box.size.height - position.dy,
+      ),
+      color: ChordColors.bgModal,
+      items: const [
+        PopupMenuItem(value: 'open', height: 40, child: Text('查看大图', style: TextStyle(fontSize: 13.5))),
+        PopupMenuItem(value: 'copy', height: 40, child: Text('复制图片', style: TextStyle(fontSize: 13.5))),
+      ],
+    );
+    if (!context.mounted) return;
+    if (action == 'open') {
+      _openImage(context, url);
+    } else if (action == 'copy') {
+      final bytes = await loadImageBytes(url);
+      final ok = bytes != null && await copyImageToClipboard(bytes);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok ? '图片已复制' : '当前平台不支持复制图片',
+              style: const TextStyle(fontSize: 13))));
+    }
+  }
+
 
   List<InlineSpan> _parseInline(String s) {
     final spans = <InlineSpan>[];
@@ -121,7 +159,7 @@ class RichTextSpan extends StatelessWidget {
       r'(\*\*(.+?)\*\*)'      // 1,2 粗体
       '|(\\*(.+?)\\*)'        // 3,4 斜体
       '|(`([^`]+)`)'          // 5,6 行内代码
-      '|(@[\w\u4e00-\u9fa5-]+(?:#\d{4})?)' // @提及
+      '|([@＠][\w\u4e00-\u9fa5-]+(?:#\d{4})?)' // @提及（含中文输入法全角＠）
       '|(https?://[^\s<>]+)', // URL
       unicode: true,
     );
@@ -147,7 +185,7 @@ class RichTextSpan extends StatelessWidget {
                 style: base.copyWith(fontFamily: 'Consolas, monospace', fontSize: 13)),
           ),
         ));
-      } else if (m.group(0).toString().startsWith('@')) {
+      } else if ((m.group(0) ?? '').startsWith('@') || (m.group(0) ?? '').startsWith('＠')) {
         spans.add(WidgetSpan(
           alignment: PlaceholderAlignment.baseline,
           baseline: TextBaseline.alphabetic,
@@ -164,7 +202,7 @@ class RichTextSpan extends StatelessWidget {
                     fontWeight: FontWeight.w500)),
           ),
         ));
-      } else if (m.group(0).toString().startsWith('http')) {
+      } else if ((m.group(0) ?? '').startsWith('http')) {
         final url = m.group(0)!;
         spans.add(TextSpan(
           text: url,

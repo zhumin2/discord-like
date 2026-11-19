@@ -23,6 +23,7 @@ const (
 	EvTypingStart     = "TYPING_START"
 	EvPresenceUpdate  = "PRESENCE_UPDATE"
 	EvChannelCreated  = "CHANNEL_CREATED"
+	EvChannelUpdate  = "CHANNEL_UPDATE"
 	EvChannelDeleted  = "CHANNEL_DELETED"
 	EvMemberJoined    = "MEMBER_JOINED"
 	EvMemberLeft      = "MEMBER_LEFT"

@@ -49,5 +49,32 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <!-- 剪贴板图片粘贴（Web）：浏览器 FileReader 在 Dart 侧流事件不可靠，
+       这里在 JS 里读成 dataURL，再以自定义事件交给 Dart（见 clipboard_image_web.dart）。
+       纯文本粘贴不受影响（只在图片分支 preventDefault）。 -->
+  <script>
+    (function () {
+      document.addEventListener('paste', function (e) {
+        var items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+        for (var i = 0; i < items.length; i++) {
+          var it = items[i];
+          if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
+            var f = it.getAsFile();
+            if (!f) continue;
+            var fr = new FileReader();
+            fr.onloadend = function () {
+              window.dispatchEvent(new CustomEvent('chord-paste-image', {
+                detail: fr.result
+              }));
+            };
+            fr.readAsDataURL(f);
+            e.preventDefault();
+            return;
+          }
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -97,12 +98,17 @@ func (s *Server) ListChannels(c *gin.Context) {
 	}
 	var channels []models.Channel
 	s.DB.Where("guild_id = ?", gid).Order("position, created_at").Find(&channels)
-	c.JSON(200, channels)
+	out := make([]map[string]any, len(channels))
+	for i := range channels {
+		out[i] = channels[i].DTO()
+	}
+	c.JSON(200, out)
 }
 
 type createChannelReq struct {
-	Name     string `json:"name"`
-	Category string `json:"category"`
+	Name      string `json:"name"`
+	Category  string `json:"category"`
+	OwnerOnly bool   `json:"ownerOnly"` // true = 公告型频道：仅创建者可发言
 }
 
 // CreateChannel 创建文字频道。
@@ -121,16 +127,94 @@ func (s *Server) CreateChannel(c *gin.Context) {
 	var maxPos int
 	s.DB.Model(&models.Channel{}).Where("guild_id = ?", gid).
 		Select("COALESCE(MAX(position),-1)").Scan(&maxPos)
+	speakMode := models.SpeakAll
+	if req.OwnerOnly {
+		speakMode = models.SpeakOwner
+	}
 	ch := models.Channel{
 		ID: models.NewID(), GuildID: gid, Name: req.Name,
 		Category: req.Category, Position: maxPos + 1,
+		CreatedBy: uid, SpeakMode: speakMode,
 	}
 	if err := s.DB.Create(&ch).Error; err != nil {
 		fail(c, 500, "创建失败")
 		return
 	}
-	s.Hub.Broadcast("guild:"+gid, ws.NewEnvelope(ws.EvChannelCreated, ch))
-	c.JSON(200, ch)
+	s.Hub.Broadcast("guild:"+gid, ws.NewEnvelope(ws.EvChannelCreated, ch.DTO()))
+	c.JSON(200, ch.DTO())
+}
+
+type updateChannelReq struct {
+	Name            *string  `json:"name"`
+	Category        *string  `json:"category"`
+	SpeakMode       *string  `json:"speakMode"`
+	AllowedSpeakers []string `json:"allowedSpeakers"`
+}
+
+// UpdateChannel 改名/改分组/改发言权限。仅频道创建者或服务器所有者可改。
+func (s *Server) UpdateChannel(c *gin.Context) {
+	uid := auth.UserID(c)
+	cid := c.Param("id")
+	var ch models.Channel
+	if err := s.DB.Where("id = ?", cid).First(&ch).Error; err != nil {
+		fail(c, 404, "频道不存在")
+		return
+	}
+	var g models.Guild
+	if err := s.DB.Where("id = ?", ch.GuildID).First(&g).Error; err != nil {
+		fail(c, 404, "服务器不存在")
+		return
+	}
+	if uid != ch.CreatedBy && uid != g.OwnerID {
+		fail(c, 403, "只有频道创建者或服务器所有者可以修改频道")
+		return
+	}
+	var req updateChannelReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, "参数错误")
+		return
+	}
+	updates := map[string]any{}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" || len([]rune(name)) > 32 {
+			fail(c, 400, "频道名称需为 1-32 个字符")
+			return
+		}
+		updates["name"] = name
+	}
+	if req.Category != nil {
+		cat := strings.TrimSpace(*req.Category)
+		if len([]rune(cat)) > 32 {
+			fail(c, 400, "分组名过长")
+			return
+		}
+		updates["category"] = cat
+	}
+	if req.SpeakMode != nil {
+		switch *req.SpeakMode {
+		case models.SpeakAll, models.SpeakOwner, models.SpeakCustom, models.SpeakNone:
+			updates["speak_mode"] = *req.SpeakMode
+		default:
+			fail(c, 400, "无效的发言模式")
+			return
+		}
+	}
+	if req.AllowedSpeakers != nil {
+		ch.SetAllowedSpeakers(req.AllowedSpeakers)
+		updates["allowed_speakers"] = ch.AllowedSpeakers
+	}
+	if len(updates) == 0 {
+		fail(c, 400, "没有需要修改的字段")
+		return
+	}
+	if err := s.DB.Model(&ch).Updates(updates).Error; err != nil {
+		fail(c, 500, "修改失败")
+		return
+	}
+	s.DB.Where("id = ?", cid).First(&ch)
+	s.Hub.Broadcast("guild:"+ch.GuildID, ws.NewEnvelope(ws.EvChannelUpdate, ch.DTO()))
+	c.JSON(200, ch.DTO())
 }
 
 // DeleteChannel 删除频道（仅服务器所有者），级联删除消息与回应。

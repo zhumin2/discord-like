@@ -71,11 +71,20 @@ class Channel {
   final String guildId;
   final String name;
   final String category;
+  /// 创建者（频道管理者）；老频道可能为空
+  final String createdBy;
+  /// all=所有人 owner=仅创建者(公告) custom=创建者+指定成员 none=无人
+  final String speakMode;
+  /// custom 模式下允许发言的成员 userID
+  final List<String> allowedSpeakers;
   const Channel({
     required this.id,
     required this.guildId,
     required this.name,
     required this.category,
+    this.createdBy = '',
+    this.speakMode = 'all',
+    this.allowedSpeakers = const [],
   });
 
   factory Channel.fromJson(Map<String, dynamic> j) => Channel(
@@ -83,7 +92,30 @@ class Channel {
         guildId: j['guildId'] as String,
         name: j['name'] as String,
         category: j['category'] as String? ?? '',
+        createdBy: j['createdBy'] as String? ?? '',
+        speakMode: j['speakMode'] as String? ?? 'all',
+        allowedSpeakers: ((j['allowedSpeakers'] as List?) ?? const [])
+            .map((e) => e as String)
+            .toList(),
       );
+
+  /// 与服务端 Channel.CanSpeak 同一套规则（guildOwnerId 恒可发言）
+  bool canSpeak(String uid, String? guildOwnerId) {
+    if (uid == guildOwnerId) return true;
+    switch (speakMode) {
+      case 'all':
+        return true;
+      case 'owner':
+        return uid == createdBy;
+      case 'custom':
+        return uid == createdBy || allowedSpeakers.contains(uid);
+      case 'none':
+        return false;
+    }
+    return true;
+  }
+
+  bool get restricted => speakMode != 'all';
 }
 
 class ReactionSummary {

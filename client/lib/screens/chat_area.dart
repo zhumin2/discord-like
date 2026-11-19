@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../file_picker.dart';
@@ -32,6 +35,7 @@ class ChatArea extends ConsumerStatefulWidget {
 class _ChatAreaState extends ConsumerState<ChatArea> {
   final _scrollCtl = ScrollController();
   Message? _replyTo; // 正在引用回复的消息（null=普通发送）
+  String _selectedText = ''; // 当前选中的文本（跨消息选择，非空时显示「复制」按钮）
 
   @override
   void didUpdateWidget(covariant ChatArea old) {
@@ -72,18 +76,23 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
     // 频道名与说明
     String title;
     String subtitle;
+    Channel? ch; // 当前频道对象（DM 时为 null）
     if (widget.isDM) {
       final dm = chat.dms.where((d) => d.id == widget.channelId).firstOrNull;
       title = dm?.other.username ?? '私信';
       subtitle = dm == null ? '' : (chat.presence[dm.other.id] == 'online' ? '在线' : '离线');
     } else {
-      final ch = chat.channels.values
+      ch = chat.channels.values
           .expand((x) => x)
           .where((c) => c.id == widget.channelId)
           .firstOrNull;
       title = ch == null ? '' : '#${ch.name}';
       subtitle = ch?.category ?? '';
     }
+    // 发言权限：DM 不限；频道按 speakMode 判定（服务器所有者恒可发言）
+    final guild = chat.guilds.where((g) => g.id == chat.guildId).firstOrNull;
+    final canSpeak =
+        widget.isDM || (ch == null || ch.canSpeak(chat.me?.id ?? '', guild?.ownerId));
 
     return Column(
       children: [
@@ -128,11 +137,25 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
             ],
           ),
         ),
-        // 消息列表（reverse + 向上分页）
+        // 消息列表（reverse + 向上分页）。
+        // SelectionArea：支持跨多条消息选择文本（v 反馈 9）；
+        // 自绘右键菜单修复「菜单鼠标一移动就消失无法点击」（v 反馈 5）。
         Expanded(
-          child: messages.isEmpty
-              ? _EmptyState(isDM: widget.isDM, title: title)
-              : NotificationListener<ScrollNotification>(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: SelectionArea(
+            // 选区变化 → 显示固定「复制」按钮（鼠标移动不会消失，v 反馈 5/9）
+            onSelectionChanged: (content) {
+              final text = content?.plainText ?? '';
+              if (text != _selectedText) {
+                setState(() => _selectedText = text);
+              }
+            },
+            contextMenuBuilder: (ctx, state) => _SelectionContextMenu(state: state),
+            child: messages.isEmpty
+                ? _EmptyState(isDM: widget.isDM, title: title)
+                : NotificationListener<ScrollNotification>(
                   onNotification: (n) {
                     // reverse 列表滚到底部（视觉上的顶部）= 加载更早消息
                     if (n is ScrollEndNotification &&
@@ -187,6 +210,36 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                     ),
                   ),
                 ),
+                ),
+              ),
+              if (_selectedText.trim().isNotEmpty)
+                Positioned(
+                  right: 16,
+                  bottom: 12,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: ChordColors.bgModal,
+                        foregroundColor: ChordColors.textBright,
+                        side: const BorderSide(color: Color(0x33FFFFFF)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      ),
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: _selectedText));
+                        if (!mounted) return;
+                        setState(() => _selectedText = '');
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已复制选中内容')));
+                      },
+                      icon: const Icon(Icons.copy, size: 15),
+                      label: Text('复制所选 ${_selectedText.trim().length} 字',
+                          style: const TextStyle(fontSize: 12.5)),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
         // typing 提示
         AnimatedSwitcher(
@@ -212,6 +265,8 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                   ),
                 ),
         ),
+        if (!canSpeak) _LockedComposer(channelId: widget.channelId),
+        if (canSpeak)
         Composer(
           channelName: title.replaceFirst('#', ''),
           isDM: widget.isDM,
@@ -227,6 +282,7 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
           },
           onTyping: () => ref.read(chatProvider.notifier).notifyTyping(widget.channelId),
           onAttach: () => _attachFile(),
+          onPasteImage: _pasteImage,
         ),
       ],
     );
@@ -234,16 +290,27 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
 
   /// v1.1 附件：选文件 → （图片）压缩 → 上传 → 生成要插入输入框的 Markdown 文本。
   Future<String?> _attachFile() async {
-    final api = ref.read(apiProvider);
-    if (api == null) return null;
     final picked = await pickFile(imagesOnly: false);
     if (picked == null) return null;
+    return _uploadBytes(picked.bytes, picked.name, displayName: picked.name);
+  }
+
+  /// 剪贴板图片粘贴（v 反馈 1）：与附件同一条管线（压缩→上传→插入 Markdown）。
+  Future<String?> _pasteImage(Uint8List bytes, String mime) async {
+    final ext = mime.contains('png') ? 'png' : (mime.contains('webp') ? 'webp' : 'jpg');
+    return _uploadBytes(bytes, 'clipboard.$ext');
+  }
+
+  Future<String?> _uploadBytes(Uint8List bytes, String name, {String? displayName}) async {
+    final api = ref.read(apiProvider);
+    if (api == null) return null;
     // 跨境带宽窄，图片先压缩再传（最长边 1600、JPEG q82；异常自动回退原图）
-    final ready = await compressImageIfNeeded(picked.bytes, picked.name);
+    final ready = await compressImageIfNeeded(bytes, name);
     final url = await api.upload(ready.bytes, ready.name);
     final ext = ready.name.toLowerCase().split('.').last;
     final isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].contains(ext);
-    return isImage ? '\n![]($url)\n' : '[${picked.name}]($url)\n';
+    final label = displayName ?? ready.name;
+    return isImage ? '\n![]($url)\n' : '[$label]($url)\n';
   }
 }
 
@@ -314,5 +381,74 @@ Color? _hexColor(String? hex) {
     return Color(int.parse(hex.replaceFirst('#', '0xFF')));
   } catch (_) {
     return null;
+  }
+}
+
+/// 受限频道（公告/静音）的输入区替代：提示 + 一键跳到第一个可发言的频道。
+class _LockedComposer extends ConsumerWidget {
+  final String channelId;
+  const _LockedComposer({required this.channelId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: ChordColors.bgLight,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.lock_outline, size: 15, color: ChordColors.textMuted),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text('此频道仅特定成员可发言',
+                style: TextStyle(fontSize: 13, color: ChordColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              final chat = ref.read(chatProvider);
+              final guild = chat.guilds
+                  .where((g) => g.id == chat.guildId)
+                  .firstOrNull;
+              final list = chat.channels[guild?.id] ?? const <Channel>[];
+              final target = list
+                  .where((c) => c.id != channelId && c.canSpeak(chat.me?.id ?? '', guild?.ownerId))
+                  .firstOrNull;
+              if (target != null) {
+                ref.read(chatProvider.notifier).selectChannel(target.id);
+              }
+            },
+            child: const Text('去可发言的频道', style: TextStyle(fontSize: 12.5)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 自绘文本选择右键菜单（复制 / 全选）。
+/// 修复默认工具条在桌面 Web 上「鼠标一移动就消失、无法点击」的问题：
+/// 用固定的 Material 卡片呈现，仅在选择变化或点击外部时收起。
+class _SelectionContextMenu extends StatelessWidget {
+  final SelectableRegionState state;
+  const _SelectionContextMenu({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: state.contextMenuAnchors,
+      buttonItems: [
+        ContextMenuButtonItem(
+          onPressed: () => state.copySelection(SelectionChangedCause.toolbar),
+          label: '复制',
+        ),
+        ContextMenuButtonItem(
+          onPressed: () => state.selectAll(SelectionChangedCause.toolbar),
+          label: '全选',
+        ),
+      ],
+    );
   }
 }

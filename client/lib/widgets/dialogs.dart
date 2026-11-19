@@ -197,42 +197,182 @@ Future<void> showInviteDialog(BuildContext context, Guild guild) async {
 Future<void> showCreateChannelDialog(BuildContext context, String guildId) async {
   final nameCtl = TextEditingController();
   final catCtl = TextEditingController();
+  // 默认创建公告型频道：只有创建者能发言，其他人只读（可在频道设置里改）
+  final ownerOnly = ValueNotifier<bool>(true);
   await showDialog(
     context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: ChordColors.bgDarker,
-      title: const Text('创建文字频道'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtl,
-              autofocus: true,
-              decoration: const InputDecoration(hintText: '频道名称，如：闲聊'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: catCtl,
-              decoration: const InputDecoration(hintText: '分组（可选，如：综合）'),
-            ),
-          ],
+    builder: (ctx) => ValueListenableBuilder<bool>(
+      valueListenable: ownerOnly,
+      builder: (ctx, val, _) => AlertDialog(
+        backgroundColor: ChordColors.bgDarker,
+        title: const Text('创建文字频道'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtl,
+                autofocus: true,
+                decoration: const InputDecoration(hintText: '频道名称，如：闲聊'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: catCtl,
+                decoration: const InputDecoration(hintText: '分组（可选，如：综合）'),
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: val,
+                onChanged: (v) => ownerOnly.value = v ?? false,
+                title: const Text('公告频道（仅我能发言）',
+                    style: TextStyle(fontSize: 13.5)),
+              ),
+            ],
+          ),
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            onPressed: () {
+              final name = nameCtl.text.trim();
+              if (name.isEmpty) return;
+              ProviderScope.containerOf(context)
+                  .read(chatProvider.notifier)
+                  .createChannel(guildId, name, catCtl.text.trim(), ownerOnly: val);
+              Navigator.pop(ctx);
+            },
+            child: const Text('创建'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-        FilledButton(
-          onPressed: () {
-            final name = nameCtl.text.trim();
-            if (name.isEmpty) return;
-            ProviderScope.containerOf(context)
-                .read(chatProvider.notifier)
-                .createChannel(guildId, name, catCtl.text.trim());
-            Navigator.pop(ctx);
-          },
-          child: const Text('创建'),
-        ),
+    ),
+  );
+}
+
+/// 频道设置：改名 + 发言权限（仅频道创建者或服务器所有者可见入口）。
+Future<void> showChannelSettingsDialog(BuildContext context, Channel channel) async {
+  final ref = ProviderScope.containerOf(context);
+  final chat = ref.read(chatProvider);
+  final notifier = ref.read(chatProvider.notifier);
+  final guild = chat.guilds.where((g) => g.id == channel.guildId).firstOrNull;
+  final members = chat.members[channel.guildId] ?? const <MemberInfo>[];
+
+  final nameCtl = TextEditingController(text: channel.name);
+  final mode = ValueNotifier<String>(channel.speakMode);
+  final allowed = <String>{...channel.allowedSpeakers};
+  final err = ValueNotifier<String?>(null);
+
+  await showDialog(
+    context: context,
+    builder: (ctx) => ValueListenableBuilder<String>(
+      valueListenable: mode,
+      builder: (ctx, modeVal, _) => ValueListenableBuilder<String?>(
+        valueListenable: err,
+        builder: (ctx, errVal, __) {
+          return AlertDialog(
+            backgroundColor: ChordColors.bgDarker,
+            title: Text('频道设置 · #' + channel.name),
+            content: SizedBox(
+              width: 400,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: nameCtl,
+                      decoration: const InputDecoration(labelText: '频道名称'),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text('谁可以发言',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                    _modeTile('all', '所有人', Icons.public, mode, modeVal),
+                    _modeTile('owner', '仅我（创建者）· 公告频道', Icons.campaign, mode, modeVal),
+                    _modeTile('custom', '我 + 指定成员', Icons.group, mode, modeVal),
+                    _modeTile('none', '无人（归档）', Icons.lock_clock, mode, modeVal),
+                    if (modeVal == 'custom') ...[
+                      const SizedBox(height: 8),
+                      const Text('勾选可发言的成员',
+                          style: TextStyle(fontSize: 12.5, color: ChordColors.textMuted)),
+                      const SizedBox(height: 4),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
+                        child: StatefulBuilder(
+                          builder: (ctx, setInner) => SingleChildScrollView(
+                            child: Column(
+                              children: [
+                                for (final m in members)
+                                  if (m.user.id != chat.me?.id && m.user.id != guild?.ownerId)
+                                    CheckboxListTile(
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                      controlAffinity: ListTileControlAffinity.leading,
+                                      value: allowed.contains(m.user.id),
+                                      onChanged: (v) => setInner(() =>
+                                          v == true
+                                              ? allowed.add(m.user.id)
+                                              : allowed.remove(m.user.id)),
+                                      title: Text(m.user.username,
+                                          style: const TextStyle(fontSize: 13.5)),
+                                    ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (errVal != null) ...[
+                      const SizedBox(height: 10),
+                      Text(errVal,
+                          style: const TextStyle(color: ChordColors.red, fontSize: 13)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+              FilledButton(
+                onPressed: () async {
+                  final e = await notifier.updateChannel(channel,
+                      name: nameCtl.text.trim(),
+                      speakMode: modeVal,
+                      allowedSpeakers: allowed.toList());
+                  if (e == null) {
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  } else {
+                    err.value = e;
+                  }
+                },
+                child: const Text('保存'),
+              ),
+            ],
+          );
+        },
+      ),
+    ),
+  );
+}
+
+Widget _modeTile(String value, String label, IconData icon,
+    ValueNotifier<String> mode, String modeVal) {
+  return RadioListTile<String>(
+    dense: true,
+    contentPadding: EdgeInsets.zero,
+    controlAffinity: ListTileControlAffinity.leading,
+    value: value,
+    groupValue: modeVal,
+    onChanged: (v) => mode.value = v ?? value,
+    title: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: ChordColors.textMuted),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 13.5)),
       ],
     ),
   );
@@ -639,6 +779,16 @@ class _ProfileSettingsDialogState extends ConsumerState<_ProfileSettingsDialog> 
             Divider(height: 1),
             const SizedBox(height: 8),
             VersionText(),
+            const SizedBox(height: 4),
+            TextButton.icon(
+              onPressed: () => showChangePasswordDialog(context),
+              icon: const Icon(Icons.password, size: 15),
+              label: const Text('修改密码…', style: TextStyle(fontSize: 12.5)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: const Size(0, 30),
+              ),
+            ),
           ],
         ),
       ),
@@ -651,4 +801,97 @@ class _ProfileSettingsDialogState extends ConsumerState<_ProfileSettingsDialog> 
       ],
     );
   }
+}
+
+/// 修改自己的密码：旧密码 + 新密码（两次）。
+Future<void> showChangePasswordDialog(BuildContext context) async {
+  final ref = ProviderScope.containerOf(context);
+  final oldCtl = TextEditingController();
+  final newCtl = TextEditingController();
+  final new2Ctl = TextEditingController();
+  final err = ValueNotifier<String?>(null);
+  final busy = ValueNotifier<bool>(false);
+
+  await showDialog(
+    context: context,
+    builder: (ctx) => ValueListenableBuilder<bool>(
+      valueListenable: busy,
+      builder: (ctx, isBusy, _) => ValueListenableBuilder<String?>(
+        valueListenable: err,
+        builder: (ctx, errVal, __) => AlertDialog(
+          backgroundColor: ChordColors.bgDarker,
+          title: const Text('修改密码'),
+          content: SizedBox(
+            width: 340,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: oldCtl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: '旧密码'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: newCtl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: '新密码（6-64 位）'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: new2Ctl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: '再次输入新密码'),
+                ),
+                if (errVal != null) ...[
+                  const SizedBox(height: 10),
+                  Text(errVal, style: const TextStyle(color: ChordColors.red, fontSize: 13)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(
+              onPressed: isBusy
+                  ? null
+                  : () async {
+                      if (newCtl.text.length < 6) {
+                        err.value = '新密码至少 6 位';
+                        return;
+                      }
+                      if (newCtl.text != new2Ctl.text) {
+                        err.value = '两次输入的新密码不一致';
+                        return;
+                      }
+                      busy.value = true;
+                      final api = ref.read(apiProvider);
+                      String? e;
+                      try {
+                        await api!.changePassword(oldCtl.text, newCtl.text);
+                      } on ApiException catch (ex) {
+                        e = ex.message;
+                      } catch (_) {
+                        e = '修改失败，请稍后再试';
+                      }
+                      busy.value = false;
+                      if (e == null) {
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('密码已修改')));
+                      } else {
+                        err.value = e;
+                      }
+                    },
+              child: isBusy
+                  ? const SizedBox(
+                      width: 14, height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

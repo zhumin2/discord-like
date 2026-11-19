@@ -308,6 +308,8 @@ class _ChannelTile extends ConsumerWidget {
     final mentions = summary?.mentions ?? 0;
     final chat = ref.watch(chatProvider);
     final isOwner = chat.guilds.where((g) => g.id == guildId).firstOrNull?.ownerId == chat.me?.id;
+    // 频道创建者或服务器所有者可打开频道设置（改名/发言权限）
+    final canManage = isOwner || channel.createdBy == chat.me?.id;
 
     return InkWell(
       onTap: () => ref.read(chatProvider.notifier).selectChannel(channel.id),
@@ -337,14 +339,30 @@ class _ChannelTile extends ConsumerWidget {
                 ),
               ),
             ),
-            if (isOwner && !selected)
+            if (channel.restricted)
+              Tooltip(
+                message: channel.speakMode == 'owner'
+                    ? '公告频道：仅创建者可发言'
+                    : '发言受限的频道',
+                child: Icon(Icons.lock_outline, size: 12, color: ChordColors.textMuted),
+              ),
+            if (canManage && !selected) ...[
               InkWell(
-                onTap: () => showDeleteChannelDialog(context, channel),
+                onTap: () => showChannelSettingsDialog(context, channel),
                 child: const Padding(
                   padding: EdgeInsets.all(3),
-                  child: Icon(Icons.close, size: 14, color: ChordColors.textMuted),
+                  child: Icon(Icons.settings_outlined, size: 14, color: ChordColors.textMuted),
                 ),
               ),
+              if (isOwner)
+                InkWell(
+                  onTap: () => showDeleteChannelDialog(context, channel),
+                  child: const Padding(
+                    padding: EdgeInsets.all(3),
+                    child: Icon(Icons.close, size: 14, color: ChordColors.textMuted),
+                  ),
+                ),
+            ],
             if (mentions > 0)
               _CountBadge(count: mentions, mention: true)
             else if (unread > 0 && !selected)

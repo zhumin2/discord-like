@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../clipboard_image.dart';
 import '../theme.dart';
 
 /// 消息输入框：回车发送（Shift+回车换行），输入时触发 typing；
@@ -8,7 +11,7 @@ import '../theme.dart';
 class Composer extends StatefulWidget {
   final String channelName;
   final bool isDM;
-  final Future<void> Function(String text) onSend;
+  final Future<String?> Function(String text) onSend;
   final VoidCallback onTyping;
   final Future<String?> Function()? onAttach;
   // 引用回复（null = 非回复状态）
@@ -18,6 +21,8 @@ class Composer extends StatefulWidget {
   final VoidCallback? onCancelReply;
   /// 频道成员名列表（@ 自动补全用）；空 = 不启用补全
   final List<String> memberNames;
+  /// 剪贴板图片粘贴回调（返回要插入输入框的 Markdown 文本）；null = 不启用
+  final Future<String?> Function(Uint8List bytes, String mime)? onPasteImage;
 
   const Composer({
     super.key,
@@ -31,6 +36,7 @@ class Composer extends StatefulWidget {
     this.replyColor,
     this.onCancelReply,
     this.memberNames = const [],
+    this.onPasteImage,
   });
 
   @override
@@ -40,15 +46,50 @@ class Composer extends StatefulWidget {
 class _ComposerState extends State<Composer> {
   final _ctl = TextEditingController();
   final _keyFocus = FocusNode(); // 仅用于捕获按键，不参与输入焦点
-  bool _sending = false;
+  bool _sending = false; // 消息发送中（发送键转圈，防连发）
+  bool _uploading = false; // 附件上传中（附件键转圈）
+  Unregister? _unregisterPaste; // 剪贴板图片监听（Web/Windows）
   List<String> _mentionCandidates = []; // @ 自动补全候选
   String _mentionToken = ''; // 正在输入的 @partial
 
   @override
+  void initState() {
+    super.initState();
+    // 剪贴板图片粘贴（v 反馈 1）：Web 监听 document.onPaste，Windows 由原生回调
+    if (widget.onPasteImage != null) {
+      _unregisterPaste = registerPasteImage((bytes, mime) => _insertPastedImage(bytes, mime));
+    }
+  }
+
+  @override
   void dispose() {
+    _unregisterPaste?.call();
     _ctl.dispose();
     _keyFocus.dispose();
     super.dispose();
+  }
+
+  /// 粘贴的图片走附件管线（压缩→上传），把返回的 Markdown 追加到输入框。
+  Future<void> _insertPastedImage(Uint8List bytes, String mime) async {
+    final fn = widget.onPasteImage;
+    if (fn == null || _uploading) return;
+    setState(() => _uploading = true);
+    String? insert;
+    try {
+      insert = await fn(bytes, mime);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('图片上传失败：$e', style: const TextStyle(fontSize: 13))));
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+    if (insert != null && insert.isNotEmpty && mounted) {
+      _ctl.text += insert;
+      _ctl.selection = TextSelection.fromPosition(TextPosition(offset: _ctl.text.length));
+      setState(() {});
+    }
   }
 
   /// 检测光标前是否有未完成的 @提及，如有则填充候选。
@@ -64,7 +105,7 @@ class _ComposerState extends State<Composer> {
       return;
     }
     final before = _ctl.text.substring(0, pos);
-    final m = RegExp(r'@([^\s@]{0,20})$').firstMatch(before);
+    final m = RegExp(r'[@＠]([^\s@＠]{0,20})$').firstMatch(before);
     if (m == null) {
       if (_mentionCandidates.isNotEmpty || _mentionToken.isNotEmpty) {
         _mentionCandidates = [];
@@ -89,6 +130,7 @@ class _ComposerState extends State<Composer> {
     if (pos < 0 || pos > _ctl.text.length) return;
     final before = _ctl.text.substring(0, pos - _mentionToken.length);
     final after = _ctl.text.substring(pos);
+    // 统一写成半角 @（渲染/通知判定都以半角为准）
     _ctl.text = '$before@$name $after';
     _ctl.selection = TextSelection.fromPosition(
         TextPosition(offset: before.length + name.length + 2));
@@ -99,20 +141,28 @@ class _ComposerState extends State<Composer> {
 
   Future<void> _send() async {
     final text = _ctl.text.trim();
-    if (text.isEmpty || _sending) return;
+    if (text.isEmpty || _sending || _uploading) return;
     setState(() => _sending = true);
     _ctl.clear();
+    String? err;
     try {
-      await widget.onSend(text);
+      err = await widget.onSend(text);
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+    // 失败（如 429 发言太快）：把原文放回输入框，提示后可重试
+    if (err != null && mounted) {
+      _ctl.text = text;
+      _ctl.selection = TextSelection.fromPosition(TextPosition(offset: _ctl.text.length));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err, style: const TextStyle(fontSize: 13))));
     }
   }
 
   Future<void> _attach() async {
     final onAttach = widget.onAttach;
-    if (onAttach == null || _sending) return;
-    setState(() => _sending = true);
+    if (onAttach == null || _sending || _uploading) return;
+    setState(() => _uploading = true);
     String? insert;
     String? err;
     try {
@@ -120,7 +170,7 @@ class _ComposerState extends State<Composer> {
     } catch (e) {
       err = e.toString();
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) setState(() => _uploading = false);
     }
     if (insert != null && insert.isNotEmpty) {
       _ctl.text += insert;
@@ -173,13 +223,13 @@ class _ComposerState extends State<Composer> {
                 padding: const EdgeInsets.only(left: 2),
                 child: IconButton(
                   tooltip: '发送文件',
-                  icon: _sending
+                  icon: _uploading
                       ? const SizedBox(
                           width: 16, height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2, color: ChordColors.blurple))
                       : const Icon(Icons.attach_file,
                           color: ChordColors.textMuted, size: 22),
-                  onPressed: _sending ? null : _attach,
+                  onPressed: (_sending || _uploading) ? null : _attach,
                 ),
               ),
             PopupMenuButton<String>(
@@ -234,10 +284,15 @@ class _ComposerState extends State<Composer> {
               padding: const EdgeInsets.only(right: 4, bottom: 2),
               child: IconButton(
                 tooltip: '发送',
-                icon: Icon(Icons.send,
-                    size: 20,
-                    color: canSend ? ChordColors.blurple : ChordColors.textMuted),
-                onPressed: canSend ? _send : null,
+                // 发送中转圈并禁用，防止快速连发两条（v 反馈 2）
+                icon: _sending
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : Icon(Icons.send,
+                        size: 20,
+                        color: canSend ? ChordColors.blurple : ChordColors.textMuted),
+                onPressed: (canSend && !_sending && !_uploading) ? _send : null,
               ),
             ),
           ],

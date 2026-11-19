@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/joho/godotenv"
 
@@ -17,6 +18,7 @@ type Config struct {
 	SeedDemo      bool
 	ClientOrigins []string // 允许的 CORS 来源，空则允许全部（开发模式）
 	UploadDir     string   // 上传文件根目录（v1.1）
+	SendIntervalMS int     // 同一用户两条消息的最小间隔毫秒（0=不限），防 AI 灌水
 }
 
 // Load 读取 .env（若存在）与环境变量。DSN/Secret 提供开发期默认值，
@@ -48,7 +50,17 @@ func Load() *Config {
 			"http://127.0.0.1:3000",
 		},
 		UploadDir: getEnv("UPLOAD_DIR", "./data/uploads"),
+		SendIntervalMS: getEnvInt("SEND_INTERVAL_MS", 1000),
 	}
+}
+
+func getEnvInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return def
 }
 
 func getEnv(key, def string) string {

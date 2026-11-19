@@ -7,18 +7,50 @@
 #include <optional>
 #include <string>
 
+#include "clipboard_image.h"
 #include "flutter/generated_plugin_registrant.h"
 
 // v1.1: native file picker channel "chord/file" (no Flutter plugin needed,
 // see AGENTS.md pitfall 8). Returns {path, name} or null on cancel.
+// 供 WM_KEYDOWN 主动回调 Dart 用的通道指针（进程生命周期内有效）
+static flutter::MethodChannel<>* g_file_channel = nullptr;
+
 static void RegisterFileChannel(flutter::FlutterEngine* engine) {
   // Heap-allocated and intentionally never freed: the channel must outlive
   // every method call for the lifetime of the process.
   auto* channel = new flutter::MethodChannel<>(
       engine->messenger(), "chord/file", &flutter::StandardMethodCodec::GetInstance());
+  g_file_channel = channel;
   channel->SetMethodCallHandler(
       [](const flutter::MethodCall<flutter::EncodableValue>& call,
          std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        // Dart → 原生：把 RGBA 写入剪贴板（图片复制）
+        if (call.method_name() == "copyImage") {
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          if (args == nullptr) {
+            result->Error("bad_args", "copyImage expects map");
+            return;
+          }
+          auto it_data = args->find(flutter::EncodableValue("data"));
+          auto it_w = args->find(flutter::EncodableValue("width"));
+          auto it_h = args->find(flutter::EncodableValue("height"));
+          const auto* bytes = (it_data != args->end())
+                                  ? std::get_if<std::vector<uint8_t>>(&it_data->second)
+                                  : nullptr;
+          const auto* w = (it_w != args->end())
+                              ? std::get_if<int32_t>(&it_w->second)
+                              : nullptr;
+          const auto* h = (it_h != args->end())
+                              ? std::get_if<int32_t>(&it_h->second)
+                              : nullptr;
+          if (bytes == nullptr || w == nullptr || h == nullptr) {
+            result->Error("bad_args", "copyImage expects data/width/height");
+            return;
+          }
+          const bool ok = clipboard_image::CopyRgbaToClipboard(*bytes, *w, *h);
+          result->Success(flutter::EncodableValue(ok));
+          return;
+        }
         if (call.method_name() != "pickFile") {
           result->NotImplemented();
           return;
@@ -161,6 +193,25 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_KEYDOWN: {
+      // Ctrl+V 且剪贴板为图片 → 主动回调 Dart（onClipboardImage）。
+      // 不吞掉按键：Flutter 仍会收到 V，文字粘贴照常。
+      if (wparam == 'V' && (GetKeyState(VK_CONTROL) & 0x8000) != 0 &&
+          g_file_channel != nullptr) {
+        std::vector<uint8_t> rgba;
+        int w = 0, h = 0;
+        if (clipboard_image::ReadClipboardRgba(&rgba, &w, &h) && w > 0 && h > 0) {
+          flutter::EncodableMap payload;
+          payload[flutter::EncodableValue("data")] = flutter::EncodableValue(rgba);
+          payload[flutter::EncodableValue("width")] = flutter::EncodableValue(w);
+          payload[flutter::EncodableValue("height")] = flutter::EncodableValue(h);
+          g_file_channel->InvokeMethod(
+              "onClipboardImage",
+              std::make_unique<flutter::EncodableValue>(payload));
+        }
+      }
+      break;
+    }
     case WM_CLOSE:
       // 点 X：隐藏到系统托盘而不是退出（托盘菜单「退出」才真正关闭）
       tray_.HideWindowToTray(hwnd);

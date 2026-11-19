@@ -22,6 +22,10 @@ type Server struct {
 	DB  *gorm.DB
 	Hub *ws.Hub
 	Cfg *config.Config
+
+	// 同一用户两条消息的最小间隔（SEND_INTERVAL_MS，默认 1000ms，0=关闭）。
+	// 固定窗口限流挡总量，它挡瞬时：防止接入 AI 后高频灌水瞬间打爆服务器。
+	msgCooldown *cooldownLimiter
 }
 
 func (s *Server) RegisterRoutes(r *gin.Engine) {
@@ -44,6 +48,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 		{
 			authed.GET("/users/me", s.Me)
 			authed.PATCH("/users/me", s.UpdateMe)
+			authed.PATCH("/users/me/password", s.limitUser(5, time.Minute, "pwd"), s.ChangePassword)
 			authed.GET("/users/search", s.SearchUsers)
 
 			authed.POST("/upload", s.limitUser(30, time.Minute, "upload"), s.Upload)
@@ -61,8 +66,9 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 			authed.POST("/invites/:code/join", s.JoinGuild)
 
 			authed.DELETE("/channels/:id", s.DeleteChannel)
+			authed.PATCH("/channels/:id", s.UpdateChannel)
 			authed.GET("/channels/:id/messages", s.ListMessages)
-			authed.POST("/channels/:id/messages", s.limitUser(20, 10*time.Second, "msg"), s.SendMessage)
+			authed.POST("/channels/:id/messages", s.limitUser(20, 10*time.Second, "msg"), s.requireSendCooldown, s.SendMessage)
 			authed.GET("/channels/:id/read", s.GetReadState)
 			authed.PUT("/channels/:id/read", s.PutReadState)
 
@@ -76,6 +82,26 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 			authed.GET("/summary", s.Summary)
 		}
 	}
+}
+
+// requireSendCooldown 发言最小间隔校验（在固定窗口限流之后）。
+func (s *Server) requireSendCooldown(c *gin.Context) {
+	if s.msgCooldown == nil {
+		interval := time.Duration(s.Cfg.SendIntervalMS) * time.Millisecond
+		if s.Cfg == nil {
+			interval = time.Second
+		}
+		s.msgCooldown = newCooldownLimiter(interval)
+	}
+	uid := c.GetString("userID")
+	if uid == "" {
+		uid = c.ClientIP()
+	}
+	if !s.msgCooldown.allow(uid) {
+		c.AbortWithStatusJSON(429, gin.H{"error": "发言太快，请稍候再发"})
+		return
+	}
+	c.Next()
 }
 
 func (s *Server) cors() gin.HandlerFunc {

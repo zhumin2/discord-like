@@ -221,6 +221,24 @@
 `selectChannel`/`openDM` 的 `messages[id] != null` 判断误以为已加载而跳过 REST 拉取，
 `noMore` 永不标记 → 顶部分页占位 spinner 永转 + 历史缺失。改为选中即拉最新一页。
 
+### 阶段 11：v1.3.5（2026-11-19，十项反馈）
+
+| # | 项 | 实现 |
+|---|---|---|
+| 1 | 图片复制/粘贴 | 粘贴：Web 由 `web/index.html` 的 JS 监听 paste → dataURL → `chord-paste-image` 自定义事件 → Dart 解码后走附件压缩上传管线；Windows 原生拦截 Ctrl+V 读 CF_DIB（RGBA→Dart 编码 PNG）。复制：图片右键菜单「复制图片」→ Web `navigator.clipboard` / Windows `copyImage` 写 CF_DIB |
+| 2 | 发送键转圈/防连发 | Composer 拆 `_sending`（发送）与 `_uploading`（附件）两个状态；发送中发送键转圈并禁用，附件键独立转圈 |
+| 3 | 编辑确定按钮 | 消息编辑器加「确定」（取消保留），回车仍可保存 |
+| 4 | @ 提及 | 渲染正则本就支持英文名；补上中文输入法全角 `＠`（渲染/补全触发/未读提及判定三处），补全候选支持中英文 |
+| 5+9 | 跨消息选择 + 复制 | 消息列表包 `SelectionArea`（跨条选择、Ctrl+C）；选区非空时右下角**固定**「复制所选 N 字」按钮——不再依赖右键菜单（右键会清空选区） |
+| 6 | 发言间隔 | 服务端 `msgCooldown`：同一用户最小间隔 `SEND_INTERVAL_MS`（默认 1000ms，0=关闭），超限 429「发言太快」；客户端 429 时把原文放回输入框可重试 |
+| 7/7.1 | 频道权限 + 改名 | Channel 新增 `created_by/speak_mode/allowed_speakers`；模式 all/owner(公告)/custom/none；创建对话框默认勾选「公告频道（仅我能发言）」；`PATCH /channels/:id` 改名/分组/权限（创建者或服主）；列表显示锁标 + 齿轮设置入口；受限频道输入框替换为「此频道仅特定成员可发言 + 去可发言的频道」；服务端 SendMessage 强制校验（DM 不限，服主恒可发言） |
+| 8 | 修改密码 | `PATCH /users/me/password`（校验旧密码，bcrypt 重写，5 次/分限流）+ 个人资料对话框「修改密码…」 |
+| 10 | 新建频道重复 | `createChannel` 的 REST 响应按 id 去重（WS `CHANNEL_CREATED` 通常先到，v1.3.4 投递串行化后必然如此） |
+
+验证：API 层权限矩阵（owner/custom/none、403、服主兜底）、冷却 429、改密、密码错误 403；
+UI 层（无头 Edge）新建频道只出现 1 次、受限频道显示锁定条、编辑有确定、发送键转圈且二次点击只发 1 条、
+粘贴图片产生 `/api/upload` 且输入框插入 `![](/uploads/...)`、跨消息选择出现浮动复制按钮且鼠标移动不消失。
+
 ### 阶段 10：多端同时使用消息乱序修复（2026-11-19，v1.3.4）
 
 用户反馈：安卓端与 Windows 端同时使用时后发的消息跑到前面。三层修复（坑 25）：
@@ -296,6 +314,19 @@
     又只按到达顺序 append，顺序错了就永久错。修复：投递全程串行化（deliverMu）+ 客户端按
     UUIDv7 id 插入 + 拉取按 id 合并（幂等）。**教训：消息类系统里「显示顺序」必须由一个权威
     序（如时间有序 ID）决定，网络到达顺序永远不可信。**
+
+26. **条件导出文件里不能再写同名实现**：`clipboard_image.dart` 既 `export ... if (dart.library.html)`
+    又定义了同名函数（内容抛 UnsupportedError），**本地声明会遮蔽导出的平台实现**，运行时直接
+    抛 "Unsupported operation: replaced by conditional export"（表现为整页灰屏）。共享类型放
+    `clipboard_common.dart`，入口文件只留 export。
+27. **Flutter Web 里 `dart:html` 的 FileReader 事件流不触发**：`reader.onLoadEnd.first` 在
+    dart2js 产物中永不完成（同一环境用原生 JS FileReader 正常，80 字节可读）。改为在
+    `web/index.html` 用 JS 读成 dataURL，派发 `CustomEvent('chord-paste-image', {detail: dataUrl})`，
+    Dart 侧 `window.on['chord-paste-image']` 接收并 base64 解码（detail 用字符串，JS 对象跨
+    dart:js 传递容易踩类型坑）。
+28. **`SelectionArea` 上右键会清空选区**，默认工具条因此"点了就没了"。跨消息复制的可靠做法：
+    `SelectionArea(onSelectionChanged:)` 记录选中文本，选区非空时显示**固定位置的浮动
+    「复制所选」按钮**（不随鼠标移动消失），右键菜单只作为补充。
 
 ---
 

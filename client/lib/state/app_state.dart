@@ -392,15 +392,20 @@ class ChatNotifier extends Notifier<ChatState> {
 
   // ---------- 消息操作 ----------
 
-  Future<void> send(String channelId, String content, {String? replyToId}) async {
+  /// 发送消息；返回 null 表示成功，否则为给用户看的错误文案
+  ///（如 429 冷却「发言太快」——输入框会保留原文让用户重试）。
+  Future<String?> send(String channelId, String content, {String? replyToId}) async {
     final trimmed = content.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty) return null;
     try {
       final msg = await _api.sendMessage(channelId, trimmed, replyToId: replyToId);
       _appendMessage(msg);
       _markRead(channelId);
+      return null;
     } on ApiException catch (e) {
-      state = state.copyWith(error: e.message);
+      return e.message;
+    } catch (_) {
+      return '发送失败，请检查网络';
     }
   }
 
@@ -619,14 +624,38 @@ class ChatNotifier extends Notifier<ChatState> {
     if (guilds.isNotEmpty) selectGuild(guilds.first.id);
   }
 
-  Future<void> createChannel(String guildId, String name, String category) async {
+  Future<void> createChannel(String guildId, String name, String category,
+      {bool ownerOnly = false}) async {
     try {
-      final ch = await _api.createChannel(guildId, name, category);
-      final chs = List.of(state.channels[guildId] ?? const <Channel>[])..add(ch);
+      final ch = await _api.createChannel(guildId, name, category, ownerOnly: ownerOnly);
+      // CHANNEL_CREATED 的 WS 事件通常先于本 REST 响应到达（v1.3.4 投递串行化后必然如此），
+      // 那边已把频道加进列表；这里必须按 id 去重，否则出现两个同名频道
+      final chs = List.of(state.channels[guildId] ?? const <Channel>[]);
+      if (!chs.any((c) => c.id == ch.id)) chs.add(ch);
       state = state.copyWith(channels: {...state.channels, guildId: chs});
     } on ApiException catch (e) {
       state = state.copyWith(error: e.message);
     }
+  }
+
+  /// 修改频道（改名/分组/发言权限）；仅频道创建者或服务器所有者。
+  Future<String?> updateChannel(Channel ch,
+      {String? name, String? category, String? speakMode, List<String>? allowedSpeakers}) async {
+    try {
+      final updated = await _api.updateChannel(ch.id,
+          name: name, category: category, speakMode: speakMode, allowedSpeakers: allowedSpeakers);
+      _applyChannelUpdate(updated);
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    }
+  }
+
+  void _applyChannelUpdate(Channel updated) {
+    final chs = List.of(state.channels[updated.guildId] ?? const <Channel>[]);
+    final i = chs.indexWhere((c) => c.id == updated.id);
+    if (i >= 0) chs[i] = updated;
+    state = state.copyWith(channels: {...state.channels, updated.guildId: chs});
   }
 
   Future<void> deleteChannel(String channelId) async {
@@ -677,7 +706,9 @@ class ChatNotifier extends Notifier<ChatState> {
           // 未读 +1；@我 则 mentions +1
           final cur = state.summary[msg.channelId];
           final mentioned = state.me != null &&
-              (msg.content.contains('@${state.me!.username}'));
+              (msg.content.contains('@${state.me!.username}') ||
+                  // 中文输入法可能敲出全角 ＠
+                  msg.content.contains('＠${state.me!.username}'));
           state = state.copyWith(summary: {
             ...state.summary,
             msg.channelId: ChannelSummary(
@@ -736,6 +767,9 @@ class ChatNotifier extends Notifier<ChatState> {
         final chs = List.of(state.channels[ch.guildId] ?? const <Channel>[]);
         if (!chs.any((c) => c.id == ch.id)) chs.add(ch);
         state = state.copyWith(channels: {...state.channels, ch.guildId: chs});
+      case 'CHANNEL_UPDATE':
+        final ch = Channel.fromJson(ev.d);
+        _applyChannelUpdate(ch);
       case 'CHANNEL_DELETED':
         final d = ev.d as Map<String, dynamic>;
         final gid = d['guildId'] as String;

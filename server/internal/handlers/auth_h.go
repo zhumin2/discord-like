@@ -234,3 +234,42 @@ func padDisc(n int) string {
 }
 
 var _ = util.RandomInviteCode
+
+type changePasswordReq struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
+}
+
+// ChangePassword 修改自己的密码：校验旧密码，写入新 bcrypt 哈希。
+// 不作废现有 JWT（多端体验优先；如需踢出可后续加 token 版本号）。
+func (s *Server) ChangePassword(c *gin.Context) {
+	uid := auth.UserID(c)
+	var u models.User
+	if err := s.DB.Where("id = ?", uid).First(&u).Error; err != nil {
+		fail(c, 404, "用户不存在")
+		return
+	}
+	var req changePasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, "参数错误")
+		return
+	}
+	if len(req.NewPassword) < 6 || len(req.NewPassword) > 64 {
+		fail(c, 400, "新密码需为 6-64 位")
+		return
+	}
+	if !auth.CheckPassword(u.PasswordHash, req.OldPassword) {
+		fail(c, 403, "旧密码不正确")
+		return
+	}
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		fail(c, 500, "修改失败")
+		return
+	}
+	if err := s.DB.Model(&u).Update("password_hash", hash).Error; err != nil {
+		fail(c, 500, "修改失败")
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
+}

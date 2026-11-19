@@ -57,3 +57,29 @@ func TestRateLimiterConcurrent(t *testing.T) {
 		t.Fatalf("并发下应精确放行 100 次，实际 %d", granted)
 	}
 }
+
+func TestCooldownLimiter(t *testing.T) {
+	l := newCooldownLimiter(50 * time.Millisecond)
+	if !l.allow("u1") {
+		t.Fatal("first send should pass")
+	}
+	if l.allow("u1") {
+		t.Fatal("second immediate send should be blocked")
+	}
+	if !l.allow("u2") {
+		t.Fatal("other user unaffected")
+	}
+	time.Sleep(60 * time.Millisecond)
+	if !l.allow("u1") {
+		t.Fatal("send after interval should pass")
+	}
+}
+
+func TestCooldownDisabled(t *testing.T) {
+	l := newCooldownLimiter(0)
+	for i := 0; i < 10; i++ {
+		if !l.allow("u1") {
+			t.Fatal("interval=0 should never block")
+		}
+	}
+}

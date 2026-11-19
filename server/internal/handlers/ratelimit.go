@@ -47,6 +47,43 @@ func (l *rateLimiter) allow(key string) bool {
 	return b.count <= l.max
 }
 
+// ---- 最小发言间隔（cooldown）----
+// 固定窗口限流允许瞬间打满配额（20 条/10s 可在 1s 内全部发出），
+// 为防接入 AI 后被高频灌水，另加「同一用户两条消息至少间隔 N 毫秒」的硬限制。
+
+type cooldownLimiter struct {
+	mu       sync.Mutex
+	interval time.Duration
+	last     map[string]time.Time
+}
+
+func newCooldownLimiter(interval time.Duration) *cooldownLimiter {
+	return &cooldownLimiter{interval: interval, last: map[string]time.Time{}}
+}
+
+// allow 记录并判断：距上次发言不足 interval 则拒绝。
+func (l *cooldownLimiter) allow(key string) bool {
+	if l.interval <= 0 {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if t, ok := l.last[key]; ok && now.Sub(t) < l.interval {
+		return false
+	}
+	l.last[key] = now
+	// 低成本清理，防止 map 无限增长
+	if len(l.last) > 8192 {
+		for k, t := range l.last {
+			if now.Sub(t) > l.interval {
+				delete(l.last, k)
+			}
+		}
+	}
+	return true
+}
+
 // limitIP 按 IP 限流（用于匿名接口：注册/登录）。
 func (s *Server) limitIP(max int, window time.Duration, scope string) gin.HandlerFunc {
 	l := newRateLimiter(max, window)
