@@ -172,7 +172,13 @@ class ChatNotifier extends Notifier<ChatState> {
     final sub = gw.events.listen(_onEvent);
     // 每次（重新）连上后重同步在线状态：断线期间的 PRESENCE/MEMBER 事件会丢失，
     // 不补拉就会停在旧快照（表现为「明明在线却显示离线」）
-    final openSub = gw.onOpen.listen((_) => _resyncPresence());
+    final openSub = gw.onOpen.listen((_) {
+      _resyncPresence();
+      // 断线期间的 MESSAGE_CREATE 也会丢：重连后补拉当前频道最新一页。
+      // _loadMessages 是按 id 合并，不会冲掉本地已有的消息。
+      final cid = state.channelId;
+      if (cid != null) _loadMessages(cid);
+    });
     // 兜底：每分钟刷新一次成员在线状态（防事件丢失/时钟漂移导致状态滞留）
     _presenceTimer?.cancel();
     _presenceTimer = Timer.periodic(const Duration(seconds: 60), (_) => _resyncPresence());
@@ -324,12 +330,26 @@ class ChatNotifier extends Notifier<ChatState> {
       final existing = {for (final m in list) m.id};
       final noMore = Set.of(state.noMore);
       if (before == null) {
-        // 服务端 ListMessages 已返回时间正序（旧→新），这里不能再 reversed，
-        // 否则历史记录会倒序显示（新消息在上、旧消息在下）。UI 用 reverse:true 列表，
-        // 列表末尾（最新）渲染在最下方。
-        list
-          ..clear()
-          ..addAll(msgs);
+        // 服务端 ListMessages 已返回时间正序（旧→新）。这里合并而不是整表替换：
+        // ① 保留已向上翻页加载的更早消息（id < 本页最旧）；
+        // ② 保留 fetch 期间 WS 新到的更晚消息（id > 本页最新）——
+        //   整表替换会把这些消息冲掉（fetch 快照比它旧），造成消息丢失；
+        // ③ 合并按 id 幂等，两个并发 fetch 响应乱序到达也不会回退状态。
+        if (msgs.isNotEmpty) {
+          final fetchedIds = {for (final m in msgs) m.id};
+          final oldest = msgs.first.id, newest = msgs.last.id;
+          final older = list
+              .where((m) => !fetchedIds.contains(m.id) && m.id.compareTo(oldest) < 0)
+              .toList();
+          final newer = list
+              .where((m) => !fetchedIds.contains(m.id) && m.id.compareTo(newest) > 0)
+              .toList();
+          list
+            ..clear()
+            ..addAll(older)
+            ..addAll(msgs)
+            ..addAll(newer);
+        }
       } else {
         // 更早的一页同样是正序，插到列表头部保持整体升序
         final older = msgs.where((m) => !existing.contains(m.id)).toList();
@@ -387,7 +407,14 @@ class ChatNotifier extends Notifier<ChatState> {
   void _appendMessage(Message msg) {
     final list = List.of(state.messages[msg.channelId] ?? const <Message>[]);
     if (list.any((m) => m.id == msg.id)) return; // WS 重复投递去重
-    list.add(msg);
+    // 按 ID（UUIDv7 时间有序，字典序=时间序）插到正确位置，而不是盲目 append：
+    // 多端同时发消息时 REST 响应 / WS 事件可能交错到达，append 会把后发的
+    // 消息放到先发的之前（表现为消息乱序）。正常情况下新消息 ID 最大，仍走末尾。
+    var i = list.length;
+    while (i > 0 && list[i - 1].id.compareTo(msg.id) > 0) {
+      i--;
+    }
+    list.insert(i, msg);
     // 作者信息兜底（WS 事件可能不带 author）
     msg.author ??= _userOf(msg.authorId) ?? state.me;
     state = state.copyWith(messages: {...state.messages, msg.channelId: list});

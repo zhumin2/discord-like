@@ -66,6 +66,12 @@ type Hub struct {
 	dms      map[string]dmCacheEntry
 	typing   map[string]time.Time // "user|channel" -> 上次广播时间（节流）
 
+	// deliverMu 串行化本地投递（受众解析 + 推送全程）。
+	// MemoryBus 在保存消息的 REST 协程里同步回调，两台设备几乎同时发消息时，
+	// 两个协程并发投递会交错 push——同一用户的不同连接可能以相反顺序收到
+	// 两条消息（表现为客户端消息乱序）。全程持锁保证一条消息先送达所有连接。
+	deliverMu sync.Mutex
+
 	stop chan struct{}
 }
 
@@ -210,7 +216,10 @@ func (h *Hub) deliverToUsers(userIDs []string, env Envelope) {
 }
 
 // DeliverLocal 处理总线投递的事件：解析 topic → 本地受众 → 推送。
+// deliverMu 保证并发 Publish 时不交错（见 Hub.deliverMu 注释）。
 func (h *Hub) DeliverLocal(topic string, raw json.RawMessage) {
+	h.deliverMu.Lock()
+	defer h.deliverMu.Unlock()
 	var env Envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return
