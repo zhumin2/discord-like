@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-18（对应发布版本 **v1.3.2**，已上线）
+> 最后更新：2026-11-19（对应发布版本 **v1.3.3**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
@@ -201,7 +201,7 @@
 **注意**：改动 users 表（avatar_url）与消息引用（reply_to_id）都依赖后端二进制更新；
 线上后端若仍是 v1.1.3，需 `update.sh server`（见第十节线上状态）。
 
-### 阶段 9：v1.3.1 → v1.3.2（2026-11-18）
+### 阶段 9：v1.3.1 → v1.3.3（版本互查 + 转圈修复）
 
 **版本号互查**：三端客户端都能看到「客户端版本 ｜ 服务器版本」，测试时可直接判断前后端是否配套。
 
@@ -216,6 +216,10 @@
 
 **v1.3.2**：release-web 增加「Verify version baked into artifacts」步骤——构建后 `grep` 校验
 `main.dart.<hash>.js` 与 `chord-server` 二进制里确实含有 `$CHORD_VERSION`，缺失直接失败（避免注入失配静默变成 `dev`）。
+
+**v1.3.3**：修复「消息列表顶部永久转圈」（坑 24）——WS 给未打开频道预投递消息后，
+`selectChannel`/`openDM` 的 `messages[id] != null` 判断误以为已加载而跳过 REST 拉取，
+`noMore` 永不标记 → 顶部分页占位 spinner 永转 + 历史缺失。改为选中即拉最新一页。
 
 ---
 ---
@@ -268,6 +272,11 @@
 21. **聊天记录顺序**：服务端 `ListMessages` 已把结果翻成时间正序返回（旧→新）；客户端 `_loadMessages` **不能再 reversed**，否则历史倒序（新消息在上）。UI 用 `ListView(reverse:true)`，列表末尾（最新）渲染在最下方。该 bug 自 MVP 就存在，因新消息走 WS 追加到末尾看似正常而长期未发现（v1.1.6 修复）。
 22. **Android release APK 连不上服务器**（v1.2.4 修复）：Flutter 模板的 `INTERNET` 权限只在 `debug/`、`profile/` 清单里，**`main/AndroidManifest.xml` 必须自己加** `<uses-permission android:name="android.permission.INTERNET"/>`，否则 release APK 完全断网；且 Android 9+ 默认禁明文 HTTP，服务器为 http:// 时必须加 `android:usesCleartextTraffic="true"`。两处叠加导致 v1.2.3 及之前的 APK 无法使用。附带修复：Android 上 `%APPDATA%`/`resolvedExecutable` 均不可用 → 登录态静默丢失；MainActivity 的 `chord/file` 通道新增 `storagePath` 方法返回 `filesDir`，storage_io 检测 Android 后走通道取路径。
 23. **条件导入的 Web 兜底文件缺函数会拖垮 io 版编译**：`image_cache_dir_web.dart` 必须实现与 io 版**完全相同**的函数签名（曾漏 `deleteCacheDir` 导致 io 版报 undefined）。另外 GDI/绘制的位图、`dart:io` 的 HttpClient 都不可在 Web 条件分支出现（`HttpClient` 属 dart:io，Web 下载用 `package:http`）。
+24. **「WS 预投递」与「按需 REST 加载」的判空冲突 → 顶部永久转圈**：`_appendMessage` 会给
+    未打开的频道在 `messages` 映射里塞进残缺列表；`selectChannel` 若用 `messages[id] != null`
+    判断"已加载"就会跳过拉取，`noMore` 永不置位，`chat_area` 里 `messages.length + 1` 的分页
+    占位 spinner 就永远渲染（v1.3.3 起选中频道/私信一律拉最新一页修复）。**教训：缓存判空要
+    区分"碰巧有数据"和"完整加载过"，最好用显式的已同步集合，别用 map 非空当信号。**
 
 ---
 

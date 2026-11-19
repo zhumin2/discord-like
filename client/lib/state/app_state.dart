@@ -311,9 +311,9 @@ class ChatNotifier extends Notifier<ChatState> {
 
   Future<void> selectChannel(String channelId) async {
     state = state.copyWith(channelId: channelId);
-    if (state.messages[channelId] == null) {
-      await _loadMessages(channelId);
-    }
+    // 无条件拉最新一页：WS 推送会给未打开的频道预置残缺列表（messages 非 null 但没做过
+    // 完整分页），若按 null 判断跳过，noMore 永远不会标记 → 顶部转圈不停 + 历史缺失。
+    await _loadMessages(channelId);
     await _markRead(channelId);
   }
 
@@ -520,9 +520,8 @@ class ChatNotifier extends Notifier<ChatState> {
           ? state.dms
           : [dm, ...state.dms];
       state = state.copyWith(dms: dms, guildId: null, channelId: dm.id);
-      if (!state.messages.containsKey(dm.id)) {
-        await _loadMessages(dm.id);
-      }
+      // 同 selectChannel：无条件拉最新一页，避免 WS 预投递的残缺列表挡住完整历史
+      await _loadMessages(dm.id);
       await _markRead(dm.id);
       return dm;
     } on ApiException catch (e) {
