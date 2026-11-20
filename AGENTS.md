@@ -4,7 +4,7 @@
 > 最后更新：2026-11-20（对应发布版本 **v1.3.8**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
-> ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
+> ｜ [面向用户的发布说明 docs/RELEASE-v1.3.8.md](docs/RELEASE-v1.3.8.md)（旧版：v1.1.0）
 > ｜ [部署说明 deploy/部署说明.md](deploy/部署说明.md)（发布包内还有一份）
 
 ---
@@ -420,9 +420,9 @@ UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob
 |---|---|---|
 | Go 1.27.3 | `D:\code\chrod\runtimes\go\bin\go.exe` | GOPROXY=`https://mirrors.aliyun.com/goproxy/,direct`（goproxy.cn 常超时） |
 | Flutter 3.50.0 | `D:\code\chrod\runtimes\flutter\bin\flutter.bat` | `PUB_HOSTED_URL=https://pub.flutter-io.cn`、`FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn` |
-| Android SDK | `F:\dev
-untimesndroid-sdk`（platform 36 / build-tools 36.0.0 / platform-tools，cmdline-tools 19.0） | 2026-11-20 重装：原 `D:\Appsndroid-sdk` 已不存在；licenses 已接受 |
-| JDK 17 | `F:\dev
+| Android SDK | `F:\dev\runtimes\android-sdk`（platform 36 / build-tools 36.0.0 / platform-tools，cmdline-tools 19.0） | 2026-11-20 重装：原 `D:\Apps\android-sdk` 已不存在；licenses 已接受 |
+| JDK 17 | `F:\dev\runtimes\jdk-17.0.21.1+2`（Microsoft OpenJDK 17.0.21.1） | Android 构建必需，`JAVA_HOME` 指向它 |
+untimes\jdk-17.0.21.1+2`（Microsoft OpenJDK 17.0.21.1） | Android 构建必需，`JAVA_HOME` 指向它 |
 untimes\jdk-17.0.21.1+2`（Microsoft OpenJDK 17.0.21.1） | Android 构建必需，`JAVA_HOME` 指向它 |
 | VS Build Tools 2022 | `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools` | Windows 桌面构建 |
 | gh CLI 2.104 | `D:\code\chrod\runtimes\bin\gh.exe` | 发 Release 用（见第八节） |
