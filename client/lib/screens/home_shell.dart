@@ -99,6 +99,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         isDM: isDMChannel,
         onOpenDrawer: isWide ? null : () => _scaffoldKey.currentState?.openDrawer(),
         onOpenMembers: isWide ? null : _openMembersSheet,
+        // 窄屏：不使用 ChatArea 自带顶栏，改用下方的统一移动导航栏
+        showHeader: isWide,
       );
     }
 
@@ -132,27 +134,34 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         child: Drawer(
           width: 300,
           backgroundColor: ChordColors.bgDarker,
-          child: Row(children: [
-            SizedBox(width: 72, child: rail),
-            Expanded(child: panel),
-          ]),
+          child: SafeArea(
+            right: false,
+            bottom: false,
+            child: Row(children: [
+              SizedBox(width: 72, child: rail),
+              Expanded(child: panel),
+            ]),
+          ),
         ),
       ),
       body: Builder(
-        builder: (ctx) => Stack(
-          children: [
-            chatArea,
-            // 窄屏没有 menu 按钮时 ChatArea 顶部自带按钮；这里兜底 DM 首页无频道选中时也提供入口
-            if (chat.channelId == null)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => Scaffold.of(ctx).openDrawer(),
-                ),
+        builder: (ctx) => SafeArea(
+          // 顶部让出状态栏、底部留给输入框自己处理（Composer 已加 padding.bottom）
+          bottom: false,
+          child: Column(
+            children: [
+              _MobileBar(
+                title: _mobileTitle(chat),
+                subtitle: _mobileSubtitle(chat),
+                isDM: isDMChannel,
+                onOpenDrawer: () => Scaffold.of(ctx).openDrawer(),
+                onOpenMembers: chat.guildId != null && !isDMChannel
+                    ? _openMembersSheet
+                    : null,
               ),
-          ],
+              Expanded(child: chatArea),
+            ],
+          ),
         ),
       ),
     );
@@ -170,3 +179,98 @@ class MemberListInner extends StatelessWidget {
   }
 }
 
+/// 窄屏导航栏标题：私信显示对方用户名，频道显示 #名称，未选中显示 Chord。
+String _mobileTitle(ChatState chat) {
+  final cid = chat.channelId;
+  if (cid == null) return 'Chord';
+  final dm = chat.dms.where((d) => d.id == cid).firstOrNull;
+  if (dm != null) return dm.other.username;
+  final ch = chat.channels.values
+      .expand((x) => x)
+      .where((c) => c.id == cid)
+      .firstOrNull;
+  return ch == null ? 'Chord' : ch.name;
+}
+
+String _mobileSubtitle(ChatState chat) {
+  final cid = chat.channelId;
+  if (cid == null) return '';
+  if (chat.dms.any((d) => d.id == cid)) return '私信';
+  final ch = chat.channels.values
+      .expand((x) => x)
+      .where((c) => c.id == cid)
+      .firstOrNull;
+  return ch?.category ?? '';
+}
+
+/// 窄屏统一导航栏（替代 ChatArea 自带顶栏）：
+/// [☰ 频道/服务器] 标题（#频道 / 私信对象） [👥 成员]
+/// 放在 SafeArea 内，安卓状态栏不会盖住；始终存在，未选频道时也能打开抽屉。
+class _MobileBar extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool isDM;
+  final VoidCallback onOpenDrawer;
+  final VoidCallback? onOpenMembers;
+
+  const _MobileBar({
+    required this.title,
+    required this.subtitle,
+    required this.isDM,
+    required this.onOpenDrawer,
+    this.onOpenMembers,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: const BoxDecoration(
+        color: ChordColors.bgDark,
+        border: Border(bottom: BorderSide(color: Color(0x22000000))),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.menu, size: 22),
+            tooltip: '频道与服务器',
+            onPressed: onOpenDrawer,
+          ),
+          Icon(isDM ? Icons.alternate_email : Icons.tag,
+              size: 19, color: ChordColors.textMuted),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    title,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5),
+                  ),
+                ),
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      subtitle,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5, color: ChordColors.textMuted),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (onOpenMembers != null)
+            IconButton(
+              icon: const Icon(Icons.people_outline, size: 21),
+              tooltip: '成员列表',
+              onPressed: onOpenMembers,
+            ),
+        ],
+      ),
+    );
+  }
+}

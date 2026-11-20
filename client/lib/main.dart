@@ -24,6 +24,16 @@ Future<void> _syncTrayBadge(int total) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 安卓/iOS：状态栏与系统导航栏统一成深色底 + 浅色图标。
+  // 不设置时部分机型会出现「深色图标压深色背景」看不见的情况；
+  // 顶栏本身在 SafeArea 内，状态栏不会遮挡内容。
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light, // Android
+    statusBarBrightness: Brightness.dark, // iOS
+    systemNavigationBarColor: Color(0xFF313338),
+    systemNavigationBarIconBrightness: Brightness.light,
+  ));
   // 恢复持久化的登录态与服务器地址
   await ServerBaseNotifier.restore();
   await TokenNotifier.restore();

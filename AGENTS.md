@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-20（对应发布版本 **v1.3.6**，已上线）
+> 最后更新：2026-11-20（对应发布版本 **v1.3.7**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
@@ -259,6 +259,21 @@ UI 层（无头 Edge）新建频道只出现 1 次、受限频道显示锁定条
 验证：双无头页面并发互发 12 条（真实创建顺序本就乱序：a1,b1,a2,b5,…），两客户端渲染顺序均与 id 升序一致（修复前后各测一轮）。
 
 ---
+### 阶段 12：v1.3.7（2026-11-20，安卓移动端导航栏）
+
+用户反馈安卓上「导航栏被覆盖、无法操作」。根因：窄屏 `Scaffold.body` 没有 SafeArea，
+ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统栏配色。
+
+| 改动 | 说明 |
+|---|---|
+| SafeArea | 窄屏 body 包 `SafeArea(top:true, bottom:false)`（底部仍由 Composer 的 padding.bottom 处理）；抽屉内容也包 SafeArea |
+| 统一移动导航栏 `_MobileBar` | 高度 52：☰ 频道/服务器 · `#` + 频道名（或私信对方）· 分组 · 👥 成员；始终显示（未选频道时为 `Chord`），不再依赖 ChatArea 顶栏 |
+| ChatArea.showHeader | 新增开关：宽屏 true（保留原顶栏），窄屏 false，避免两条栏叠加 |
+| 系统栏配色 | `main()` 里 `SystemChrome.setSystemUIOverlayStyle`：状态栏透明 + 浅色图标，系统导航栏 #313338 + 浅色图标 |
+
+验证：无头 Edge 390×844 —— 顶栏显示 `☰ # 公告 信息 👥`（不再有重复 #），点 ☰ 抽屉打开，
+点 👥 成员 BottomSheet 打开。**安卓真机需用 Release APK 验证状态栏留白**（本机无 Android SDK，无法本地出包）。
+
 ---
 
 ## 五、踩坑记录（重要！避免重蹈）
@@ -341,6 +356,10 @@ UI 层（无头 Edge）新建频道只出现 1 次、受限频道显示锁定条
     ③ 桌面端输入框旁提供显式「粘贴图片」按钮（不依赖键盘/右键）。两条路径用
     「字节数 + 2 秒」去重，避免同一次 Ctrl+V 触发两次。
     原生 DIB 读写可用独立 C++ 测试验证（`clipboard_image.cpp` + 手工构造 RGBA 往返）。
+30. **移动端全屏布局必须包 SafeArea**：窄屏 `Scaffold.body` 直接放内容时，顶部会被系统状态栏
+    （时间/信号）压住、底部被手势条压住——安卓上表现为「顶栏的 ☰ 点不到」。做法：body 用
+    `SafeArea(top: true, bottom: false)`，底部留给 Composer 自己的 `MediaQuery.padding.bottom`；
+    Drawer 内容也要 SafeArea。另外用 `SystemChrome.setSystemUIOverlayStyle` 统一状态栏/导航栏配色与图标亮度。
 ---
 
 ## 六、线上运行事实（服务器 129.226.159.168）

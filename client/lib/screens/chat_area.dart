@@ -19,6 +19,9 @@ class ChatArea extends ConsumerStatefulWidget {
   final bool isDM;
   final VoidCallback? onOpenDrawer; // 手机端：☰ 打开抽屉
   final VoidCallback? onOpenMembers; // 手机端：👥 打开成员面板
+  /// 是否渲染自带的顶部栏。窄屏由 HomeShell 提供统一的移动导航栏，这里传 false，
+  /// 避免两条栏叠加、以及被系统状态栏覆盖（安卓机型上表现为"顶栏点不到"）。
+  final bool showHeader;
 
   const ChatArea({
     super.key,
@@ -26,6 +29,7 @@ class ChatArea extends ConsumerStatefulWidget {
     required this.isDM,
     this.onOpenDrawer,
     this.onOpenMembers,
+    this.showHeader = true,
   });
 
   @override
@@ -96,8 +100,8 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
 
     return Column(
       children: [
-        // 顶部栏
-        Container(
+        // 顶部栏（窄屏由 HomeShell 的 _MobileBar 替代）
+        if (widget.showHeader) Container(
           height: 48,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: const BoxDecoration(
