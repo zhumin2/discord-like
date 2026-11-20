@@ -272,7 +272,7 @@ ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统�
 | 系统栏配色 | `main()` 里 `SystemChrome.setSystemUIOverlayStyle`：状态栏透明 + 浅色图标，系统导航栏 #313338 + 浅色图标 |
 
 验证：无头 Edge 390×844 —— 顶栏显示 `☰ # 公告 信息 👥`（不再有重复 #），点 ☰ 抽屉打开，
-点 👥 成员 BottomSheet 打开。**安卓真机需用 Release APK 验证状态栏留白**（本机无 Android SDK，无法本地出包）。
+点 👥 成员 BottomSheet 打开。**安卓真机需用 Release APK 验证状态栏留白**（本机已装 Android SDK，可本地出包验证）。
 
 ---
 
@@ -356,6 +356,14 @@ ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统�
     ③ 桌面端输入框旁提供显式「粘贴图片」按钮（不依赖键盘/右键）。两条路径用
     「字节数 + 2 秒」去重，避免同一次 Ctrl+V 触发两次。
     原生 DIB 读写可用独立 C++ 测试验证（`clipboard_image.cpp` + 手工构造 RGBA 往返）。
+31. **Gradle wrapper 发行版下载会重定向到 GitHub Releases（国内被墙）**：`services.gradle.org`
+    307 → `github.com/gradle/gradle-distributions` → `release-assets.githubusercontent.com`，本机下不动。
+    做法：从 `https://mirrors.cloud.tencent.com/gradle/` 下同版本 zip，**预置到
+    `~/.gradle/wrapper/dists/gradle-<ver>-all/<hash>/`**（hash = base36(MD5(distributionUrl))，
+    Python 一行可算；目录里要有解压好的 `gradle-<ver>/` 和 `.ok` 标记）。预置后 wrapper 直接复用，
+    **不要改仓库里的 `gradle-wrapper.properties`**（否则 CI 也会走镜像）。本机已同时为官方 URL
+    （`aca6g93cdtcf0oapcfka748qh`）与腾讯镜像 URL（`1rsjz3joo2ioxecfvvnmxyd43`）各缓存了一份。
+
 30. **移动端全屏布局必须包 SafeArea**：窄屏 `Scaffold.body` 直接放内容时，顶部会被系统状态栏
     （时间/信号）压住、底部被手势条压住——安卓上表现为「顶栏的 ☰ 点不到」。做法：body 用
     `SafeArea(top: true, bottom: false)`，底部留给 Composer 自己的 `MediaQuery.padding.bottom`；
@@ -390,7 +398,8 @@ ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统�
 |---|---|---|
 | Go 1.27.3 | `D:\code\chrod\runtimes\go\bin\go.exe` | GOPROXY=`https://mirrors.aliyun.com/goproxy/,direct`（goproxy.cn 常超时） |
 | Flutter 3.50.0 | `D:\code\chrod\runtimes\flutter\bin\flutter.bat` | `PUB_HOSTED_URL=https://pub.flutter-io.cn`、`FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn` |
-| Android SDK | `D:\Apps\android-sdk`（API 36） | JDK 17 Temurin；licenses 已接受 |
+| Android SDK | `F:\devuntimesndroid-sdk`（platform 36 / build-tools 36.0.0 / platform-tools，cmdline-tools 19.0） | 2026-11-20 重装：原 `D:\Appsndroid-sdk` 已不存在；licenses 已接受 |
+| JDK 17 | `F:\devuntimes\jdk-17.0.21.1+2`（Microsoft OpenJDK 17.0.21.1） | Android 构建必需，`JAVA_HOME` 指向它 |
 | VS Build Tools 2022 | `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools` | Windows 桌面构建 |
 | gh CLI 2.104 | `D:\code\chrod\runtimes\bin\gh.exe` | 发 Release 用（见第八节） |
 | 工作区 | `D:\code\chrod\`（仓库 `discord-like/`，产物 `dist/`，脚本 `deploy-scripts/`） | |
@@ -423,6 +432,10 @@ cp client/assets/fonts/full/*.ttf client/assets/fonts/
 cd client && flutter build windows --release --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081 --dart-define=CHORD_VERSION=$VERSION
 
 # Android（推荐 arm64；另两个 ABI 用 --split-per-abi 自动产出；同样先用全量字体）
+# 本机需先导出（Git Bash）：JAVA_HOME / ANDROID_HOME / ANDROID_SDK_ROOT
+export JAVA_HOME="F:\dev\runtimes\jdk-17.0.21.1+2"
+export ANDROID_HOME="F:\dev\runtimes\android-sdk" ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="/f/dev/runtimes/jdk-17.0.21.1+2/bin:$PATH"
 cd client && flutter build apk --release --split-per-abi --dart-define=CHORD_DEFAULT_BASE=http://129.226.159.168:8081 --dart-define=CHORD_VERSION=$VERSION
 ```
 
