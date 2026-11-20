@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-19（对应发布版本 **v1.3.5**，已上线）
+> 最后更新：2026-11-20（对应发布版本 **v1.3.6**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
@@ -234,6 +234,9 @@
 | 7/7.1 | 频道权限 + 改名 | Channel 新增 `created_by/speak_mode/allowed_speakers`；模式 all/owner(公告)/custom/none；创建对话框默认勾选「公告频道（仅我能发言）」；`PATCH /channels/:id` 改名/分组/权限（创建者或服主）；列表显示锁标 + 齿轮设置入口；受限频道输入框替换为「此频道仅特定成员可发言 + 去可发言的频道」；服务端 SendMessage 强制校验（DM 不限，服主恒可发言） |
 | 8 | 修改密码 | `PATCH /users/me/password`（校验旧密码，bcrypt 重写，5 次/分限流）+ 个人资料对话框「修改密码…」 |
 | 10 | 新建频道重复 | `createChannel` 的 REST 响应按 id 去重（WS `CHANNEL_CREATED` 通常先到，v1.3.4 投递串行化后必然如此） |
+
+**v1.3.6**：修 Windows 端图片粘贴/复制失效（坑 29：键盘消息到不了顶层窗口）——
+Dart 侧 Ctrl+V 主动拉取 + 桌面「粘贴图片」按钮 + 图片悬停工具条；原生 DIB 往返用独立 C++ 测试验证。
 
 **头像压缩**：`_pickAvatar` 改用头像尺寸参数（`maxDim: 320, quality: 88, minBytes: 60KB`）——
 之前复用聊天图片默认值 1600/82/500KB，手机原图省不下多少；实测 5.9MB(2000×1500) → 21.7KB(320×240)。
