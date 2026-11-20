@@ -35,6 +35,10 @@ func Open(dsn string) (*gorm.DB, error) {
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// 老数据的 speak_mode 可能是空串（v1.3.5 之前没有该列）→ 统一补成 all，
+	// 否则客户端会把它们当成"受限频道"显示锁标
+	g.Model(&models.Channel{}).Where("speak_mode = '' OR speak_mode IS NULL").
+		Update("speak_mode", models.SpeakAll)
 	log.Printf("[db] mysql connected, schema migrated")
 	return g, nil
 }

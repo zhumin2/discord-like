@@ -105,6 +105,10 @@ func (ch *Channel) SetAllowedSpeakers(ids []string) {
 
 // CanSpeak 判断 uid 能否在该频道发言。guildOwnerID 恒可发言（管理兜底）。
 func (ch *Channel) CanSpeak(uid, guildOwnerID string) bool {
+	// 「无人（归档）」对所有人关闭（含服务器所有者），否则归档频道仍能发言
+	if ch.SpeakMode == SpeakNone {
+		return false
+	}
 	if uid == guildOwnerID {
 		return true
 	}
@@ -131,10 +135,14 @@ func (ch *Channel) CanSpeak(uid, guildOwnerID string) bool {
 
 // DTO 输出给客户端的频道结构（allowedSpeakers 转成数组）。
 func (ch Channel) DTO() map[string]any {
+	mode := ch.SpeakMode
+	if mode == "" {
+		mode = SpeakAll
+	}
 	return map[string]any{
 		"id": ch.ID, "guildId": ch.GuildID, "name": ch.Name, "category": ch.Category,
 		"position": ch.Position, "createdAt": ch.CreatedAt,
-		"createdBy": ch.CreatedBy, "speakMode": ch.SpeakMode,
+		"createdBy": ch.CreatedBy, "speakMode": mode,
 		"allowedSpeakers": ch.AllowedSpeakerList(),
 	}
 }

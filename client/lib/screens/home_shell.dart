@@ -60,6 +60,24 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    // 别人在其它频道 @ 我：弹一条提示（mentionTick 每次提及 +1）
+    ref.listen(chatProvider.select((s) => s.mentionTick), (prev, next) {
+      if (next > (prev ?? 0)) {
+        final text = ref.read(chatProvider).mentionText;
+        if (text != null && text.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.alternate_email, size: 16, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+              ],
+            ),
+            duration: const Duration(seconds: 4),
+          ));
+        }
+      }
+    });
     final chat = ref.watch(chatProvider);
     final width = MediaQuery.of(context).size.width;
     final isWide = width >= wideBreakpoint;
@@ -110,10 +128,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               ? DMPartnerPanel(dmId: chat.channelId!)
               : const SizedBox())
           : MemberList(guildId: chat.guildId!);
-      // Material 祖先必须有：否则 Text 会以红字+黄下划线的调试样式渲染
-      return Material(
-        color: ChordColors.bgDark,
-        child: Row(
+      // 用 Scaffold（而不是裸 Material）：既提供 Material 祖先（否则 Text 是红字黄下划线
+      // 调试样式），也让 ScaffoldMessenger 有宿主——宽屏下 @ 提及的 SnackBar 才能显示。
+      return Scaffold(
+        backgroundColor: ChordColors.bgDark,
+        body: Row(
           children: [
             rail,
             SizedBox(width: 240, child: panel),

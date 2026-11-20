@@ -101,6 +101,8 @@ class Channel {
 
   /// 与服务端 Channel.CanSpeak 同一套规则（guildOwnerId 恒可发言）
   bool canSpeak(String uid, String? guildOwnerId) {
+    // 「无人（归档）」对所有人关闭（含服主）
+    if (speakMode == 'none') return false;
     if (uid == guildOwnerId) return true;
     switch (speakMode) {
       case 'all':

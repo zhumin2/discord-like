@@ -55,6 +55,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 
 			authed.GET("/guilds", s.ListGuilds)
 			authed.POST("/guilds", s.CreateGuild)
+			authed.PATCH("/guilds/:id", s.UpdateGuild)
 			authed.GET("/guilds/:id/channels", s.ListChannels)
 			authed.POST("/guilds/:id/channels", s.CreateChannel)
 			authed.GET("/guilds/:id/members", s.ListMembers)

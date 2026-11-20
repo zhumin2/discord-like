@@ -402,6 +402,73 @@ Future<void> showDeleteChannelDialog(BuildContext context, Channel channel) asyn
   );
 }
 
+/// 服务器设置：改名（仅所有者；入口在频道栏顶部 ⋮ 菜单）。
+Future<void> showGuildSettingsDialog(BuildContext context, Guild guild) async {
+  final ref = ProviderScope.containerOf(context);
+  final nameCtl = TextEditingController(text: guild.name);
+  final err = ValueNotifier<String?>(null);
+  final busy = ValueNotifier<bool>(false);
+
+  await showDialog(
+    context: context,
+    builder: (ctx) => ValueListenableBuilder<bool>(
+      valueListenable: busy,
+      builder: (ctx, isBusy, _) => ValueListenableBuilder<String?>(
+        valueListenable: err,
+        builder: (ctx, errVal, __) => AlertDialog(
+          backgroundColor: ChordColors.bgDarker,
+          title: const Text('服务器设置'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtl,
+                  decoration: const InputDecoration(labelText: '服务器名称'),
+                ),
+                if (errVal != null) ...[
+                  const SizedBox(height: 10),
+                  Text(errVal, style: const TextStyle(color: ChordColors.red, fontSize: 13)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(
+              onPressed: isBusy
+                  ? null
+                  : () async {
+                      final name = nameCtl.text.trim();
+                      if (name.isEmpty) {
+                        err.value = '服务器名称不能为空';
+                        return;
+                      }
+                      busy.value = true;
+                      final e = await ref
+                          .read(chatProvider.notifier)
+                          .updateGuild(guild, name: name);
+                      busy.value = false;
+                      if (e == null) {
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } else {
+                        err.value = e;
+                      }
+                    },
+              child: isBusy
+                  ? const SizedBox(
+                      width: 14, height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 Future<void> showLeaveGuildDialog(BuildContext context, Guild guild) async {
   final ref = ProviderScope.containerOf(context);
   final chat = ref.read(chatProvider);

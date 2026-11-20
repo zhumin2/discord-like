@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -142,6 +143,57 @@ func (s *Server) CreateChannel(c *gin.Context) {
 	}
 	s.Hub.Broadcast("guild:"+gid, ws.NewEnvelope(ws.EvChannelCreated, ch.DTO()))
 	c.JSON(200, ch.DTO())
+}
+
+// UpdateGuild 修改服务器名称/图标色（仅所有者）。
+func (s *Server) UpdateGuild(c *gin.Context) {
+	uid := auth.UserID(c)
+	gid := c.Param("id")
+	var g models.Guild
+	if err := s.DB.Where("id = ?", gid).First(&g).Error; err != nil {
+		fail(c, 404, "服务器不存在")
+		return
+	}
+	if g.OwnerID != uid {
+		fail(c, 403, "只有服务器所有者可以修改")
+		return
+	}
+	var req struct {
+		Name      *string `json:"name"`
+		IconColor *string `json:"iconColor"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, 400, "参数错误")
+		return
+	}
+	updates := map[string]any{}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" || len([]rune(name)) > 32 {
+			fail(c, 400, "服务器名称需为 1-32 个字符")
+			return
+		}
+		updates["name"] = name
+	}
+	if req.IconColor != nil {
+		color := strings.TrimSpace(*req.IconColor)
+		if !regexp.MustCompile(`^#[0-9a-fA-F]{6}$`).MatchString(color) {
+			fail(c, 400, "颜色格式需为 #RRGGBB")
+			return
+		}
+		updates["icon_color"] = color
+	}
+	if len(updates) == 0 {
+		fail(c, 400, "没有需要修改的字段")
+		return
+	}
+	if err := s.DB.Model(&g).Updates(updates).Error; err != nil {
+		fail(c, 500, "修改失败")
+		return
+	}
+	s.DB.Where("id = ?", gid).First(&g)
+	s.Hub.Broadcast("guild:"+gid, ws.NewEnvelope(ws.EvGuildUpdate, g))
+	c.JSON(200, g)
 }
 
 type updateChannelReq struct {

@@ -27,6 +27,7 @@ const (
 	EvChannelDeleted  = "CHANNEL_DELETED"
 	EvMemberJoined    = "MEMBER_JOINED"
 	EvMemberLeft      = "MEMBER_LEFT"
+	EvGuildUpdate     = "GUILD_UPDATE"
 	EvGuildDeleted    = "GUILD_DELETED"
 	EvDMCreated       = "DM_CREATED"
 	EvUserUpdate      = "USER_UPDATE"

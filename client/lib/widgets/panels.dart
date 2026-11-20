@@ -227,15 +227,21 @@ class ChannelPanel extends ConsumerWidget {
                   icon: const Icon(Icons.more_vert, size: 18, color: ChordColors.textMuted),
                   color: ChordColors.bgModal,
                   onSelected: (v) {
+                    if (v == 'settings') showGuildSettingsDialog(context, guild!);
                     if (v == 'invite') showInviteDialog(context, guild!);
                     if (v == 'create') showCreateChannelDialog(context, guildId);
                     if (v == 'leave') showLeaveGuildDialog(context, guild!);
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'invite', child: Text('邀请码')),
-                    PopupMenuItem(value: 'create', child: Text('创建频道')),
-                    PopupMenuItem(value: 'leave', child: Text('退出服务器')),
-                  ],
+                  itemBuilder: (_) {
+                    final isOwner = guild != null && guild.ownerId == chat.me?.id;
+                    return [
+                      if (isOwner)
+                        const PopupMenuItem(value: 'settings', child: Text('服务器设置')),
+                      const PopupMenuItem(value: 'invite', child: Text('邀请码')),
+                      const PopupMenuItem(value: 'create', child: Text('创建频道')),
+                      const PopupMenuItem(value: 'leave', child: Text('退出服务器')),
+                    ];
+                  },
                 ),
               ],
             ),
@@ -346,7 +352,8 @@ class _ChannelTile extends ConsumerWidget {
                     : '发言受限的频道',
                 child: Icon(Icons.lock_outline, size: 12, color: ChordColors.textMuted),
               ),
-            if (canManage && !selected) ...[
+            // 齿轮：频道设置（创建者/服主）；删除仍走长按，避免每行堆三个图标
+            if (canManage && !selected)
               InkWell(
                 onTap: () => showChannelSettingsDialog(context, channel),
                 child: const Padding(
@@ -354,15 +361,6 @@ class _ChannelTile extends ConsumerWidget {
                   child: Icon(Icons.settings_outlined, size: 14, color: ChordColors.textMuted),
                 ),
               ),
-              if (isOwner)
-                InkWell(
-                  onTap: () => showDeleteChannelDialog(context, channel),
-                  child: const Padding(
-                    padding: EdgeInsets.all(3),
-                    child: Icon(Icons.close, size: 14, color: ChordColors.textMuted),
-                  ),
-                ),
-            ],
             if (mentions > 0)
               _CountBadge(count: mentions, mention: true)
             else if (unread > 0 && !selected)

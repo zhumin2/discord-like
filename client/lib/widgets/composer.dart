@@ -152,8 +152,10 @@ class _ComposerState extends State<Composer> {
     _ctl.text = '$before@$name $after';
     _ctl.selection = TextSelection.fromPosition(
         TextPosition(offset: before.length + name.length + 2));
-    _mentionCandidates = [];
-    _mentionToken = '';
+    setState(() {
+      _mentionCandidates = [];
+      _mentionToken = '';
+    });
     widget.onTyping();
   }
 
@@ -212,6 +214,13 @@ class _ComposerState extends State<Composer> {
         widget.onPasteImage != null) {
       _pasteFromSystemClipboard();
     }
+    // @ 候选列表打开时：Tab 选中第一个候选（之前 Tab 被焦点遍历吃掉，用户反馈"没反应"）
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.tab &&
+        _mentionCandidates.isNotEmpty) {
+      _applyMention(_mentionCandidates.first);
+      return KeyEventResult.handled;
+    }
     // 桌面/Web：无 Shift 修饰的 Enter 发送，Shift+Enter 换行
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.enter &&
@@ -235,8 +244,12 @@ class _ComposerState extends State<Composer> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (_mentionCandidates.isNotEmpty) _buildMentionList(),
-          if (widget.replyAuthor != null) _buildReplyBar(),
+          // 注意：这里必须保留固定占位（空时 SizedBox.shrink），不能条件插入。
+          // Column 的子节点是按索引更新的：在顶部插入候选列表会让下面的输入框
+          // 被整体重建，Web 端 DOM input 因此重新挂载、立刻失焦
+          //（用户反馈：输入 @ 之后"跳出输入框"，后续字符和 Tab 都无效）。
+          _mentionCandidates.isEmpty ? const SizedBox.shrink() : _buildMentionList(),
+          widget.replyAuthor == null ? const SizedBox.shrink() : _buildReplyBar(),
           Container(
             decoration: BoxDecoration(
               color: ChordColors.bgLight,

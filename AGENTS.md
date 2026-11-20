@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-20（对应发布版本 **v1.3.7**，已上线）
+> 最后更新：2026-11-20（对应发布版本 **v1.3.8**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.1.0.md](docs/RELEASE-v1.1.0.md)
@@ -274,6 +274,21 @@ ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统�
 验证：无头 Edge 390×844 —— 顶栏显示 `☰ # 公告 信息 👥`（不再有重复 #），点 ☰ 抽屉打开，
 点 👥 成员 BottomSheet 打开。**安卓真机需用 Release APK 验证状态栏留白**（本机已装 Android SDK，可本地出包验证）。
 
+### 阶段 13：v1.3.8（2026-11-20，用户群里的 4 项反馈）
+
+| 项 | 修复 |
+|---|---|
+| 改头像/改名后聊天记录不刷新 | `_applyUser()` 统一处理 USER_UPDATE 与本机修改：me、成员列表、私信对端、**所有历史消息的 author 引用**（之前漏了最后一个，必须重登才刷新） |
+| 服务器改名 | 后端 `PATCH /guilds/:id`（仅所有者，1-32 字）+ `GUILD_UPDATE` 广播 + 客户端「服务器设置」对话框（频道栏 ⋮ 菜单，仅所有者可见） |
+| @ 弹出框：输入 @ 后失焦、Tab 无效 | 根因是 Composer 的 Column **条件插入**候选列表 → 下面的 TextField 被重建 → Web 端 DOM input 失焦（坑 32）。改为固定占位（空时 `SizedBox.shrink()`）+ `_applyMention` 里 setState；Tab 选中第一个候选。另加被 @ 提示：别人在其它频道 @ 我时弹 SnackBar「xxx 在 #频道 提到了你」 |
+| 「无人（归档）」仍能发言 | `CanSpeak` 里 none 优先于服主放行（归档对所有人关闭）；客户端 `Channel.canSpeak` 同步；老数据 `speak_mode=''` 启动时迁移为 `all`（否则全显示锁标） |
+
+顺带：宽屏 HomeShell 改用 `Scaffold`（原来裸 Material，导致 SnackBar 无宿主、@ 提示不显示，坑 33）；
+频道行去掉多余的删除 X（保留长按删除），只留齿轮设置入口。
+
+验证：模型单测（none 含服主全部 false）；API（改名 200/非所有者 403、none 三种身份 403）；
+UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob "、候选列表收起、@ 提示 SnackBar 出现）。
+
 ---
 
 ## 五、踩坑记录（重要！避免重蹈）
@@ -356,6 +371,13 @@ ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统�
     ③ 桌面端输入框旁提供显式「粘贴图片」按钮（不依赖键盘/右键）。两条路径用
     「字节数 + 2 秒」去重，避免同一次 Ctrl+V 触发两次。
     原生 DIB 读写可用独立 C++ 测试验证（`clipboard_image.cpp` + 手工构造 RGBA 往返）。
+32. **Column 里条件插入子组件会重建输入框 → Web 端失焦**：Composer 的候选列表/引用条如果写成
+    `if (cond) widget`，插入时后续子节点索引整体后移，TextField 被当成新节点重建，DOM input
+    重新挂载，焦点丢给 flutter-view（用户看到的就是「输入 @ 后光标跳出输入框，之后打不了字，
+    Tab 也没反应」）。修法：**保留固定占位**（空时 `SizedBox.shrink()`），子节点数量/顺序恒定。
+33. **宽屏布局没有 Scaffold 时 SnackBar 不显示且不报错**：HomeShell 宽屏分支原先是裸 `Material`，
+    `ScaffoldMessenger` 找不到已注册的 Scaffold，SnackBar 进队列但永远不出现。宽屏也要用
+    `Scaffold(body: Row(...))`。
 31. **Gradle wrapper 发行版下载会重定向到 GitHub Releases（国内被墙）**：`services.gradle.org`
     307 → `github.com/gradle/gradle-distributions` → `release-assets.githubusercontent.com`，本机下不动。
     做法：从 `https://mirrors.cloud.tencent.com/gradle/` 下同版本 zip，**预置到
@@ -398,8 +420,10 @@ ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统�
 |---|---|---|
 | Go 1.27.3 | `D:\code\chrod\runtimes\go\bin\go.exe` | GOPROXY=`https://mirrors.aliyun.com/goproxy/,direct`（goproxy.cn 常超时） |
 | Flutter 3.50.0 | `D:\code\chrod\runtimes\flutter\bin\flutter.bat` | `PUB_HOSTED_URL=https://pub.flutter-io.cn`、`FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn` |
-| Android SDK | `F:\devuntimesndroid-sdk`（platform 36 / build-tools 36.0.0 / platform-tools，cmdline-tools 19.0） | 2026-11-20 重装：原 `D:\Appsndroid-sdk` 已不存在；licenses 已接受 |
-| JDK 17 | `F:\devuntimes\jdk-17.0.21.1+2`（Microsoft OpenJDK 17.0.21.1） | Android 构建必需，`JAVA_HOME` 指向它 |
+| Android SDK | `F:\dev
+untimesndroid-sdk`（platform 36 / build-tools 36.0.0 / platform-tools，cmdline-tools 19.0） | 2026-11-20 重装：原 `D:\Appsndroid-sdk` 已不存在；licenses 已接受 |
+| JDK 17 | `F:\dev
+untimes\jdk-17.0.21.1+2`（Microsoft OpenJDK 17.0.21.1） | Android 构建必需，`JAVA_HOME` 指向它 |
 | VS Build Tools 2022 | `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools` | Windows 桌面构建 |
 | gh CLI 2.104 | `D:\code\chrod\runtimes\bin\gh.exe` | 发 Release 用（见第八节） |
 | 工作区 | `D:\code\chrod\`（仓库 `discord-like/`，产物 `dist/`，脚本 `deploy-scripts/`） | |

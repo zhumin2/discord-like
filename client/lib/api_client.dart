@@ -146,6 +146,12 @@ class ApiClient {
       _call('DELETE', '/guilds/$guildId/members/me',
           body: {if (successorId != null) 'successorId': successorId});
 
+  Future<Guild> updateGuild(String guildId, {String? name, String? iconColor}) async =>
+      Guild.fromJson(await _call('PATCH', '/guilds/$guildId', body: {
+        if (name != null) 'name': name,
+        if (iconColor != null) 'iconColor': iconColor,
+      }));
+
   Future<void> deleteGuild(String guildId) => _call('DELETE', '/guilds/$guildId');
 
   Future<String> regenInvite(String guildId) async =>

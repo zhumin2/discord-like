@@ -97,6 +97,9 @@ class ChatState {
   final String? guildId; // 当前服务器（null = 私信首页视图）
   final String? channelId; // 当前频道或私信会话
   final Map<String, List<MemberInfo>> members; // guildId -> 成员
+  /// 别人在其它频道 @ 我时的提示文案（UI 弹 SnackBar 用）；mentionTick 每次+1 触发
+  final String? mentionText;
+  final int mentionTick;
 
   const ChatState({
     this.me,
@@ -113,6 +116,8 @@ class ChatState {
     this.guildId,
     this.channelId,
     this.members = const {},
+    this.mentionText,
+    this.mentionTick = 0,
   });
 
   static const Object _unset = Object();
@@ -132,6 +137,8 @@ class ChatState {
     Object? guildId = _unset,
     Object? channelId = _unset,
     Map<String, List<MemberInfo>>? members,
+    String? mentionText,
+    int? mentionTick,
     bool clearError = false,
   }) {
     return ChatState(
@@ -150,6 +157,8 @@ class ChatState {
       guildId: guildId == _unset ? this.guildId : guildId as String?,
       channelId: channelId == _unset ? this.channelId : channelId as String?,
       members: members ?? this.members,
+      mentionText: mentionText ?? this.mentionText,
+      mentionTick: mentionTick ?? this.mentionTick,
     );
   }
 }
@@ -601,6 +610,23 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
+  /// 修改服务器名称/图标色（仅所有者）；返回错误文案或 null。
+  Future<String?> updateGuild(Guild g, {String? name, String? iconColor}) async {
+    try {
+      final updated = await _api.updateGuild(g.id, name: name, iconColor: iconColor);
+      _applyGuildUpdate(updated);
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    }
+  }
+
+  void _applyGuildUpdate(Guild g) {
+    state = state.copyWith(
+      guilds: state.guilds.map((x) => x.id == g.id ? g : x).toList(),
+    );
+  }
+
   Future<void> deleteGuild(String guildId) async {
     try {
       await _api.deleteGuild(guildId);
@@ -676,19 +702,57 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
-  /// 本机修改个人资料后，把新资料写回状态（me / 成员列表 / 私信对端）。
+  /// 本机修改个人资料后，把新资料写回状态（me / 成员列表 / 历史消息作者）。
   void applyMe(User newMe) {
     if (state.me == null) return;
-    state = state.copyWith(me: newMe);
-    // 成员列表里同步自己
+    _applyUser(newMe);
+  }
+
+  /// 某用户资料变化：同步 me、成员列表、私信对端、以及所有历史消息里的 author。
+  /// 之前只更新了前三个，聊天记录里的头像/名字要重新登录才刷新（用户反馈）。
+  void _applyUser(User u) {
     final members = <String, List<MemberInfo>>{};
     for (final e in state.members.entries) {
       members[e.key] = e.value
-          .map((m) => m.user.id == newMe.id ? MemberInfo(user: newMe, status: m.status) : m)
+          .map((m) => m.user.id == u.id ? MemberInfo(user: u, status: m.status) : m)
           .toList();
     }
-    // 私信对端是自己（理论上不存在，防御）
-    state = state.copyWith(members: members);
+    final dms = state.dms
+        .map((d0) => d0.other.id == u.id
+            ? DMSession(id: d0.id, other: u, lastMessageId: d0.lastMessageId)
+            : d0)
+        .toList();
+    // 历史消息：Message.author 是可变的，替换后需要换新的 List 触发刷新
+    final messages = <String, List<Message>>{};
+    for (final e in state.messages.entries) {
+      var changed = false;
+      final list = e.value.map((m) {
+        if (m.author?.id == u.id) {
+          changed = true;
+          m.author = u;
+        }
+        return m;
+      }).toList();
+      messages[e.key] = changed ? list : e.value;
+    }
+    state = state.copyWith(
+      members: members,
+      dms: dms,
+      me: state.me?.id == u.id ? u : null,
+      messages: messages,
+    );
+  }
+
+  /// 频道/私信的显示名（提及提示用）。
+  String _channelDisplayName(String channelId) {
+    final dm = state.dms.where((d) => d.id == channelId).firstOrNull;
+    if (dm != null) return dm.other.username;
+    for (final chs in state.channels.values) {
+      for (final c in chs) {
+        if (c.id == channelId) return '#${c.name}';
+      }
+    }
+    return '频道';
   }
 
   void clearError() => state = state.copyWith(clearError: true);
@@ -718,6 +782,14 @@ class ChatNotifier extends Notifier<ChatState> {
               mentions: (cur?.mentions ?? 0) + (mentioned ? 1 : 0),
             ),
           });
+          if (mentioned) {
+            // 被 @ 时给个即时提示（声音/桌面通知暂未做，先用 SnackBar）
+            final name = _channelDisplayName(msg.channelId);
+            state = state.copyWith(
+              mentionText: '${msg.author?.username ?? '有人'} 在 $name 提到了你',
+              mentionTick: state.mentionTick + 1,
+            );
+          }
         }
       case 'MESSAGE_UPDATE':
         final m = Message.fromJson(ev.d);
@@ -795,6 +867,8 @@ class ChatNotifier extends Notifier<ChatState> {
         final uid = d['userId'] as String;
         final ms = (state.members[gid] ?? const <MemberInfo>[]).where((m) => m.user.id != uid).toList();
         state = state.copyWith(members: {...state.members, gid: ms});
+      case 'GUILD_UPDATE':
+        _applyGuildUpdate(Guild.fromJson(ev.d as Map<String, dynamic>));
       case 'GUILD_DELETED':
         // 所在服务器被解散：移除本地数据并切回首个可用服务器
         final gid = (ev.d as Map<String, dynamic>)['guildId'] as String;
@@ -815,23 +889,9 @@ class ChatNotifier extends Notifier<ChatState> {
           state = state.copyWith(dms: [dm, ...state.dms]);
         }
       case 'USER_UPDATE':
-        // 某成员改了名字/头像：更新成员列表、私信对端、以及历史消息里的作者引用
+        // 某成员改了名字/头像：成员列表、私信对端、我、以及历史消息里的作者引用
         final d = ev.d as Map<String, dynamic>;
-        final u = User.fromJson(d['user']);
-        final members = <String, List<MemberInfo>>{};
-        for (final e in state.members.entries) {
-          members[e.key] = e.value
-              .map((m) => m.user.id == u.id ? MemberInfo(user: u, status: m.status) : m)
-              .toList();
-        }
-        final dms = state.dms
-            .map((d0) => d0.other.id == u.id
-                ? DMSession(id: d0.id, other: u, lastMessageId: d0.lastMessageId)
-                : d0)
-            .toList();
-        var me = state.me;
-        if (state.me?.id == u.id) me = u;
-        state = state.copyWith(members: members, dms: dms, me: me);
+        _applyUser(User.fromJson(d['user']));
     }
   }
 }
