@@ -44,12 +44,20 @@ func (s *Server) Register(c *gin.Context) {
 		fail(c, 400, "参数错误")
 		return
 	}
-	if !validUsername(req.Username) {
+	username := strings.TrimSpace(req.Username)
+	if !validUsername(username) {
 		fail(c, 400, "用户名需为 2-20 位字母、数字、下划线或连字符")
 		return
 	}
 	if len(req.Password) < 6 {
 		fail(c, 400, "密码至少 6 位")
+		return
+	}
+	// 用户名全局唯一（数据库另有唯一索引兜底并发）：同名会让 @提及/搜索指向不明确
+	var existing int64
+	s.DB.Model(&models.User{}).Where("username = ?", username).Count(&existing)
+	if existing > 0 {
+		fail(c, 409, "用户名已被占用，请换一个")
 		return
 	}
 	hash, err := auth.HashPassword(req.Password)
@@ -59,17 +67,24 @@ func (s *Server) Register(c *gin.Context) {
 	}
 	u := models.User{
 		ID:           models.NewID(),
-		Username:     req.Username,
+		Username:     username,
 		PasswordHash: hash,
 		AvatarColor:  avatarColors[rand.Intn(len(avatarColors))],
 	}
-	for i := 0; i < 20; i++ {
+	// 诊断号仍保留用于展示（alice#1234），但不再参与唯一性；
+	// 唯一索引在 username 上，Create 撞索引即说明并发抢注，直接 409。
+	for i := 0; i < 5; i++ {
 		u.Discriminator = padDisc(1000 + rand.Intn(9000))
-		if err := s.DB.Create(&u).Error; err == nil {
+		err := s.DB.Create(&u).Error
+		if err == nil {
 			break
 		}
-		if i == 19 {
-			fail(c, 409, "用户名已占用，请换一个")
+		if isDuplicateKey(err) {
+			fail(c, 409, "用户名已被占用，请换一个")
+			return
+		}
+		if i == 4 {
+			fail(c, 500, "注册失败，请稍后再试")
 			return
 		}
 	}
@@ -148,6 +163,15 @@ func (s *Server) UpdateMe(c *gin.Context) {
 			fail(c, 400, "用户名需为 2-20 位字母、数字、下划线或连字符")
 			return
 		}
+		if name != u.Username {
+			var existing int64
+			s.DB.Model(&models.User{}).
+				Where("username = ? AND id <> ?", name, uid).Count(&existing)
+			if existing > 0 {
+				fail(c, 409, "用户名已被占用，请换一个")
+				return
+			}
+		}
 		updates["username"] = name
 	}
 	if req.AvatarColor != nil {
@@ -176,6 +200,10 @@ func (s *Server) UpdateMe(c *gin.Context) {
 		return
 	}
 	if err := s.DB.Model(&u).Updates(updates).Error; err != nil {
+		if isDuplicateKey(err) {
+			fail(c, 409, "用户名已被占用，请换一个")
+			return
+		}
 		fail(c, 500, "修改失败")
 		return
 	}
@@ -272,4 +300,13 @@ func (s *Server) ChangePassword(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"ok": true})
+}
+
+// isDuplicateKey 判断是否为 MySQL 唯一键冲突（Error 1062）。
+func isDuplicateKey(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Error 1062") || strings.Contains(msg, "Duplicate entry")
 }

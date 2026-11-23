@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-20（对应发布版本 **v1.3.8**，已上线）
+> 最后更新：2026-11-23（v1.3.9 开发中：用户名唯一）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.3.8.md](docs/RELEASE-v1.3.8.md)（旧版：v1.1.0）
@@ -289,6 +289,26 @@ ChatArea 自带顶栏顶到状态栏下面（☰ 点不到）；也没有系统�
 验证：模型单测（none 含服主全部 false）；API（改名 200/非所有者 403、none 三种身份 403）；
 UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob "、候选列表收起、@ 提示 SnackBar 出现）。
 
+### 阶段 14：v1.3.9（2026-11-23，用户名唯一）
+
+用户反馈：注册时用已存在的用户名会得到两个同名用户，数据混乱（@提及/搜索无法区分）。
+
+原设计是 Discord 式 `username#discriminator`（同名不同编号允许共存），但本项目
+**@提及、搜索、成员列表都只按 username 匹配**，同名直接产生歧义。
+
+| 层 | 改动 |
+|---|---|
+| 数据 | 启动迁移 `migrateUsernameUnique`：先把历史重名改名为 `name_discriminator`（保留最早注册的那个），再建唯一索引 `idx_users_username`。日志会打印每一处改名（`journalctl -u chord-server` 可查） |
+| 注册 | 先查重（409「用户名已被占用，请换一个」），并由唯一索引兜底并发；撞 1062 同样返回 409。discriminator 仍随机生成但只用于展示 |
+| 改名 | `PATCH /users/me` 改用户名同样查重，撞唯一索引返回 409 |
+| 客户端 | 无需改动，登录/注册页已有错误提示（直接显示服务端 message） |
+
+验证（本机 MySQL）：注册 alice → 409；注册 ALICE（大小写）→ 409；注册新用户 → 200，再注册同名 → 409；
+改名成 alice → 409；改名成新名字 → 200。迁移：手工插重复 bob#9999 并删索引 → 重启后自动改名 `bob_9999` 并重建索引。
+
+**注意**：线上升级后如果历史上确实存在重名，**后来注册的那个人会被改名**（如 `test_1234`），
+旧用户名将无法登录，需要用新名字登录（改名记录看 `journalctl -u chord-server | grep 重复用户名`）。
+
 ---
 
 ## 五、踩坑记录（重要！避免重蹈）
@@ -385,6 +405,12 @@ UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob
     Python 一行可算；目录里要有解压好的 `gradle-<ver>/` 和 `.ok` 标记）。预置后 wrapper 直接复用，
     **不要改仓库里的 `gradle-wrapper.properties`**（否则 CI 也会走镜像）。本机已同时为官方 URL
     （`aca6g93cdtcf0oapcfka748qh`）与腾讯镜像 URL（`1rsjz3joo2ioxecfvvnmxyd43`）各缓存了一份。
+
+34. **用户名唯一性不能只靠「用户名+编号」组合**：Discord 的 `name#discriminator` 允许同名，
+    但前提是 UI 每一处都展示完整 tag。本项目 @提及/搜索只按 `username` 匹配，同名立刻产生歧义。
+    收紧为**用户名全局唯一**时有两个坑：① `AutoMigrate` 直接加 `uniqueIndex` 遇到历史重复会失败，
+    必须先去重再 `ALTER TABLE ... ADD UNIQUE INDEX`（见 `db.migrateUsernameUnique`）；
+    ② 应用层先查重只是优化体验，**并发注册必须靠唯一索引兜底**（捕获 MySQL 1062 返回 409）。
 
 30. **移动端全屏布局必须包 SafeArea**：窄屏 `Scaffold.body` 直接放内容时，顶部会被系统状态栏
     （时间/信号）压住、底部被手势条压住——安卓上表现为「顶栏的 ☰ 点不到」。做法：body 用
