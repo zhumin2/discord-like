@@ -406,6 +406,14 @@ UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob
     **不要改仓库里的 `gradle-wrapper.properties`**（否则 CI 也会走镜像）。本机已同时为官方 URL
     （`aca6g93cdtcf0oapcfka748qh`）与腾讯镜像 URL（`1rsjz3joo2ioxecfvvnmxyd43`）各缓存了一份。
 
+35. **线上库存在混用排序规则（collation），手写 SQL 要防 1267**：本地库所有列都是
+    `utf8mb4_unicode_ci`（GORM 按 DSN 建表），线上部分后建的表是 MySQL 8 默认的
+    `utf8mb4_0900_ai_ci`。用 `SET @uid='...'` + `WHERE user_id = @uid` 会报
+    `Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and (utf8mb4_0900_ai_ci,IMPLICIT)`；
+    跨表子查询（`messages.channel_id IN (SELECT id FROM dm_channels ...)`）同样会踩。
+    手写运维 SQL 统一用 `BINARY` 逐字节比较（id 都是 ASCII，等价且不受 collation 影响）：
+    `WHERE BINARY user_id = BINARY @uid`。Go 侧参数化查询不受影响（参数继承列 collation）。
+
 34. **用户名唯一性不能只靠「用户名+编号」组合**：Discord 的 `name#discriminator` 允许同名，
     但前提是 UI 每一处都展示完整 tag。本项目 @提及/搜索只按 `username` 匹配，同名立刻产生歧义。
     收紧为**用户名全局唯一**时有两个坑：① `AutoMigrate` 直接加 `uniqueIndex` 遇到历史重复会失败，
