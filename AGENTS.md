@@ -4,7 +4,7 @@
 > 最后更新：2026-11-23（对应发布版本 **v1.4.0**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
-> ｜ [面向用户的发布说明 docs/RELEASE-v1.3.8.md](docs/RELEASE-v1.3.8.md)（旧版：v1.1.0）
+> ｜ [面向用户的发布说明 docs/RELEASE-v1.4.0.md](docs/RELEASE-v1.4.0.md)（历史：v1.3.8、v1.1.0）
 > ｜ [部署说明 deploy/部署说明.md](deploy/部署说明.md)（发布包内还有一份）
 
 ---
