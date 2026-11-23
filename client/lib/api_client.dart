@@ -164,6 +164,19 @@ class ApiClient {
       Guild.fromJson((await _call('POST', '/invites/$code/join'))['guild']);
 
   // ---- messages ----
+  /// 服务器内消息搜索（跨频道，最多 50 条，时间倒序）
+  Future<List<Message>> searchMessages(String guildId, String q) async =>
+      ((await _call('GET', '/guilds/$guildId/search', q: {'q': q})) as List)
+          .map((e) => Message.fromJson(e))
+          .toList();
+
+  /// 以某条消息为中心取前后各半页（跳转定位用）
+  Future<List<Message>> listMessagesAround(String channelId, String messageId) async =>
+      ((await _call('GET', '/channels/$channelId/messages',
+              q: {'around': messageId})) as List)
+          .map((e) => Message.fromJson(e))
+          .toList();
+
   Future<List<Message>> listMessages(String channelId, {String? before, int limit = 50}) async {
     final r = await _call('GET', '/channels/$channelId/messages',
         q: {if (before != null) 'before': before, 'limit': '$limit'});

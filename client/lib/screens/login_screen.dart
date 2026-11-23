@@ -92,7 +92,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.forum, size: 44, color: ChordColors.blurple),
+                Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.asset('assets/logo.png', width: 72, height: 72),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Text(
                   _isRegister ? '创建一个账号' : '欢迎回来！',

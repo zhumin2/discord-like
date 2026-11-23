@@ -11,6 +11,7 @@ import '../state/app_state.dart';
 import '../theme.dart';
 import '../image_compress.dart';
 import '../widgets/composer.dart';
+import '../widgets/dialogs.dart';
 import '../widgets/message_tile.dart';
 
 /// 聊天主区域：频道头部 + 消息列表 + typing 提示 + 输入框。
@@ -40,6 +41,8 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
   final _scrollCtl = ScrollController();
   Message? _replyTo; // 正在引用回复的消息（null=普通发送）
   String _selectedText = ''; // 当前选中的文本（跨消息选择，非空时显示「复制」按钮）
+  final _jumpKey = GlobalKey(); // 跳转目标消息的定位锚点
+  int _lastJumpTick = 0;
 
   @override
   void didUpdateWidget(covariant ChatArea old) {
@@ -93,6 +96,14 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
       title = ch == null ? '' : '#${ch.name}';
       subtitle = ch?.category ?? '';
     }
+    // 跳转定位：jumpTick 变化 → 下一帧滚动到目标消息并高亮 2.5s
+    ref.listen(chatProvider.select((s) => s.jumpTick), (prev, next) {
+      if (next != _lastJumpTick) {
+        _lastJumpTick = next;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _revealJumpTarget());
+      }
+    });
+
     // 发言权限：DM 不限；频道按 speakMode 判定（服务器所有者恒可发言）
     final guild = chat.guilds.where((g) => g.id == chat.guildId).firstOrNull;
     final canSpeak =
@@ -132,6 +143,12 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                 ),
               ],
               const Spacer(),
+              if (!widget.isDM && chat.guildId != null)
+                IconButton(
+                  icon: const Icon(Icons.search, size: 20),
+                  onPressed: () => showSearchDialog(context, chat.guildId!),
+                  tooltip: '搜索消息',
+                ),
               if (widget.onOpenMembers != null)
                 IconButton(
                   icon: const Icon(Icons.people_outline, size: 20),
@@ -174,6 +191,9 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                     child: ListView.builder(
                       controller: _scrollCtl,
                       reverse: true,
+                      // 跳转定位时放宽预构建范围，否则目标消息在视口外不会被 build，
+                      // GlobalKey 拿不到 context，ensureVisible 无法滚动
+                      cacheExtent: chat.highlightId != null ? 4000 : 250,
                       padding: const EdgeInsets.only(top: 12, bottom: 8),
                       itemCount: messages.length + (noMore ? 0 : 1),
                       itemBuilder: (context, i) {
@@ -196,9 +216,14 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                             prev.authorId == m.authorId &&
                             m.createdAt.difference(prev.createdAt).inMinutes.abs() < 5;
                         return MessageTile(
+                          key: m.id == chat.highlightId ? _jumpKey : null,
                           msg: m,
                           compact: compact,
                           isMine: m.authorId == chat.me?.id,
+                          highlighted: m.id == chat.highlightId,
+                          onJumpToQuoted: (mid) => ref
+                              .read(chatProvider.notifier)
+                              .jumpToMessage(widget.channelId, mid),
                           onReply: (msg) => setState(() => _replyTo = msg),
                           onToggleReaction: (id, emoji) =>
                               ref.read(chatProvider.notifier).toggleReaction(id, emoji),
@@ -290,6 +315,33 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
         ),
       ],
     );
+  }
+
+  /// 滚动到跳转目标（等列表渲染后）并清除高亮。
+  /// reverse 列表里第 i 条距离底部 (len-1-i) 条，先按平均高度估算 offset 粗跳，
+  /// 再用 ensureVisible 精细对齐（目标项在 cacheExtent 内会被构建出来）。
+  void _revealJumpTarget() {
+    final chat = ref.read(chatProvider);
+    final id = chat.highlightId;
+    if (id != null) {
+      final list = chat.messages[widget.channelId] ?? const <Message>[];
+      final idx = list.indexWhere((m) => m.id == id);
+      if (idx >= 0 && _scrollCtl.hasClients) {
+        final fromEnd = list.length - 1 - idx;
+        final est = (fromEnd * 62.0).clamp(0.0, _scrollCtl.position.maxScrollExtent);
+        _scrollCtl.jumpTo(est);
+      }
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final ctx = _jumpKey.currentContext;
+      if (ctx != null) {
+        await Scrollable.ensureVisible(ctx,
+            alignment: 0.5, duration: const Duration(milliseconds: 240));
+      }
+    });
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted) ref.read(chatProvider.notifier).clearHighlight();
+    });
   }
 
   /// v1.1 附件：选文件 → （图片）压缩 → 上传 → 生成要插入输入框的 Markdown 文本。

@@ -29,7 +29,10 @@ class GuildRail extends ConsumerWidget {
             label: '私信',
             color: ChordColors.blurple,
             badge: _dmBadge(chat),
-            child: const Icon(Icons.forum_outlined, color: Colors.white, size: 26),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.asset('assets/logo.png', width: 30, height: 30),
+            ),
             onTap: onOpenDMs,
           ),
           const Divider(indent: 16, endIndent: 16, height: 24),

@@ -65,6 +65,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/logo.png
+
   # 内置中文字体（Noto Sans SC，OFL 许可），
   # 避免 CanvasKit 从 fonts.gstatic.com 拉取失败导致中文显示为方框
   fonts:

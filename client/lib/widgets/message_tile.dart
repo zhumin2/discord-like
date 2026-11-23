@@ -16,6 +16,7 @@ class MessageTile extends StatefulWidget {
   final void Function(Message msg)? onReply;       // 引用回复
   final void Function(String messageId)? onJumpToQuoted; // 点击引用块跳转
   final String Function(String url)? resolveUrl; // 相对 URL 解析（v1.1 图片）
+  final bool highlighted; // 跳转定位时短暂高亮
 
   const MessageTile({
     super.key,
@@ -28,6 +29,7 @@ class MessageTile extends StatefulWidget {
     this.onReply,
     this.onJumpToQuoted,
     this.resolveUrl,
+    this.highlighted = false,
   });
 
   @override
@@ -168,7 +170,9 @@ class _MessageTileState extends State<MessageTile> {
         clipBehavior: Clip.none,
         children: [
           Container(
-            color: _hover ? const Color(0x0DFFFFFF) : null,
+            color: widget.highlighted
+                ? const Color(0x33FFC857)
+                : (_hover ? const Color(0x0DFFFFFF) : null),
             padding: const EdgeInsets.only(top: 2, bottom: 2),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -436,16 +440,25 @@ class _EmojiButton extends StatelessWidget {
   }
 }
 
-/// 引用块：显示被回复消息的作者与摘要。
-class _QuoteBlock extends StatelessWidget {
+/// 引用块：显示被回复消息的作者与摘要；点击跳转原消息。
+/// 注意：消息列表外层是 SelectionArea，它的选择手势会赢走 InkWell 的 tap，
+/// 所以这里用 Listener 在原始指针层判定「按下→抬起基本没移动」= 点击。
+class _QuoteBlock extends StatefulWidget {
   final MessageReply reply;
   final void Function(String messageId)? onTap;
 
   const _QuoteBlock({required this.reply, this.onTap});
 
+  @override
+  State<_QuoteBlock> createState() => _QuoteBlockState();
+}
+
+class _QuoteBlockState extends State<_QuoteBlock> {
+  Offset? _downPos;
+
   Color get _color {
     try {
-      return Color(int.parse(reply.authorColor.replaceFirst('#', '0xFF')));
+      return Color(int.parse(widget.reply.authorColor.replaceFirst('#', '0xFF')));
     } catch (_) {
       return ChordColors.blurple;
     }
@@ -453,38 +466,46 @@ class _QuoteBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final reply = widget.reply;
     final snippet = reply.content.replaceAll('\n', ' ').trim();
     return Padding(
       padding: const EdgeInsets.only(bottom: 3),
-      child: InkWell(
-        onTap: onTap == null ? null : () => onTap!(reply.id),
-        borderRadius: BorderRadius.circular(4),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 520),
-          padding: const EdgeInsets.fromLTRB(8, 3, 8, 3),
-          decoration: BoxDecoration(
-            color: const Color(0x14FFFFFF),
-            borderRadius: BorderRadius.circular(4),
-            border: Border(left: BorderSide(color: _color, width: 3)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.reply, size: 12, color: ChordColors.textMuted),
-              const SizedBox(width: 4),
-              Text(reply.authorName,
-                  style: TextStyle(
-                      fontSize: 12.5, fontWeight: FontWeight.w600, color: _color)),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  snippet.isEmpty ? '（无文字内容）' : snippet,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12.5, color: ChordColors.textMuted),
+      child: Listener(
+        onPointerDown: (e) => _downPos = e.position,
+        onPointerUp: (e) {
+          final moved = _downPos == null ? 999.0 : (e.position - _downPos!).distance;
+          _downPos = null;
+          if (moved < 8 && widget.onTap != null) widget.onTap!(reply.id);
+        },
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 520),
+            padding: const EdgeInsets.fromLTRB(8, 3, 8, 3),
+            decoration: BoxDecoration(
+              color: const Color(0x14FFFFFF),
+              borderRadius: BorderRadius.circular(4),
+              border: Border(left: BorderSide(color: _color, width: 3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.reply, size: 12, color: ChordColors.textMuted),
+                const SizedBox(width: 4),
+                Text(reply.authorName,
+                    style: TextStyle(
+                        fontSize: 12.5, fontWeight: FontWeight.w600, color: _color)),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    snippet.isEmpty ? '（无文字内容）' : snippet,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12.5, color: ChordColors.textMuted),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

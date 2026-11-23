@@ -162,6 +162,29 @@ func (s *Server) ListMessages(c *gin.Context) {
 		// 仅允许几个档位，避免滥用
 		limit = map[string]int{"20": 20, "100": 100}[v]
 	}
+	// around=<messageId>：返回该消息前后各半页（用于搜索结果/引用回复跳转定位）
+	if around := c.Query("around"); around != "" {
+		var target models.Message
+		if err := s.DB.Where("id = ? AND channel_id = ?", around, cid).First(&target).Error; err != nil {
+			fail(c, 404, "消息不存在")
+			return
+		}
+		half := limit / 2
+		var before []models.Message
+		s.DB.Where("channel_id = ? AND id <= ?", cid, around).
+			Order("id DESC").Limit(half + 1).Find(&before)
+		var after []models.Message
+		s.DB.Where("channel_id = ? AND id > ?", cid, around).
+			Order("id ASC").Limit(half).Find(&after)
+		// before 是倒序，翻成正序后接上 after
+		for i, j := 0, len(before)-1; i < j; i, j = i+1, j-1 {
+			before[i], before[j] = before[j], before[i]
+		}
+		msgs := append(before, after...)
+		s.attachExtras(msgs, uid)
+		c.JSON(200, msgs)
+		return
+	}
 	q := s.DB.Where("channel_id = ?", cid)
 	if before := c.Query("before"); before != "" {
 		q = q.Where("id < ?", before)
@@ -174,6 +197,41 @@ func (s *Server) ListMessages(c *gin.Context) {
 	// 反转为正序
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	s.attachExtras(msgs, uid)
+	c.JSON(200, msgs)
+}
+
+// SearchGuildMessages 在服务器所有频道里搜索消息内容，按时间倒序返回（最多 50 条）。
+// 用 INSTR 而不是 LIKE，避免用户输入 % _ \ 被当成通配符。
+func (s *Server) SearchGuildMessages(c *gin.Context) {
+	uid := auth.UserID(c)
+	gid := c.Param("id")
+	if !s.isMember(uid, gid) {
+		fail(c, 403, "不在该服务器中")
+		return
+	}
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		fail(c, 400, "请输入搜索关键词")
+		return
+	}
+	if len([]rune(q)) > 50 {
+		fail(c, 400, "关键词过长")
+		return
+	}
+	var channelIDs []string
+	s.DB.Model(&models.Channel{}).Where("guild_id = ?", gid).Pluck("id", &channelIDs)
+	if len(channelIDs) == 0 {
+		c.JSON(200, []models.Message{})
+		return
+	}
+	var msgs []models.Message
+	if err := s.DB.Where("channel_id IN ?", channelIDs).
+		Where("INSTR(content, ?) > 0", q).
+		Order("id DESC").Limit(50).Find(&msgs).Error; err != nil {
+		fail(c, 500, "搜索失败")
+		return
 	}
 	s.attachExtras(msgs, uid)
 	c.JSON(200, msgs)

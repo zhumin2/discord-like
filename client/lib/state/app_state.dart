@@ -100,6 +100,9 @@ class ChatState {
   /// 别人在其它频道 @ 我时的提示文案（UI 弹 SnackBar 用）；mentionTick 每次+1 触发
   final String? mentionText;
   final int mentionTick;
+  /// 跳转目标高亮（搜索结果/引用回复定位）；jumpTick 每次跳转 +1 触发滚动
+  final String? highlightId;
+  final int jumpTick;
 
   const ChatState({
     this.me,
@@ -118,6 +121,8 @@ class ChatState {
     this.members = const {},
     this.mentionText,
     this.mentionTick = 0,
+    this.highlightId,
+    this.jumpTick = 0,
   });
 
   static const Object _unset = Object();
@@ -139,6 +144,9 @@ class ChatState {
     Map<String, List<MemberInfo>>? members,
     String? mentionText,
     int? mentionTick,
+    String? highlightId,
+    int? jumpTick,
+    bool clearHighlight = false,
     bool clearError = false,
   }) {
     return ChatState(
@@ -159,6 +167,8 @@ class ChatState {
       members: members ?? this.members,
       mentionText: mentionText ?? this.mentionText,
       mentionTick: mentionTick ?? this.mentionTick,
+      highlightId: clearHighlight ? null : (highlightId ?? this.highlightId),
+      jumpTick: jumpTick ?? this.jumpTick,
     );
   }
 }
@@ -330,6 +340,43 @@ class ChatNotifier extends Notifier<ChatState> {
     // 完整分页），若按 null 判断跳过，noMore 永远不会标记 → 顶部转圈不停 + 历史缺失。
     await _loadMessages(channelId);
     await _markRead(channelId);
+  }
+
+  /// 跳转到指定消息：必要时切频道、拉取上下文、滚动并高亮。
+  Future<void> jumpToMessage(String channelId, String messageId) async {
+    final needSwitch = state.channelId != channelId;
+    if (needSwitch) {
+      state = state.copyWith(channelId: channelId);
+    }
+    final list = state.messages[channelId] ?? const <Message>[];
+    if (needSwitch || !list.any((m) => m.id == messageId)) {
+      await _loadMessagesAround(channelId, messageId);
+      await _markRead(channelId);
+    }
+    state = state.copyWith(
+      highlightId: messageId,
+      jumpTick: state.jumpTick + 1,
+    );
+  }
+
+  Future<void> _loadMessagesAround(String channelId, String messageId) async {
+    try {
+      final msgs = await _api.listMessagesAround(channelId, messageId);
+      // 上下文页不知道前后边界，清掉 noMore 让继续滚动时还能加载
+      final noMore = Set.of(state.noMore)..remove(channelId);
+      state = state.copyWith(
+        messages: {...state.messages, channelId: msgs},
+        noMore: noMore,
+      );
+    } on ApiException catch (e) {
+      state = state.copyWith(error: e.message);
+    }
+  }
+
+  void clearHighlight() {
+    if (state.highlightId != null) {
+      state = state.copyWith(clearHighlight: true);
+    }
   }
 
   Future<void> _loadMessages(String channelId, {String? before}) async {

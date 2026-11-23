@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -969,4 +970,177 @@ Future<void> showChangePasswordDialog(BuildContext context) async {
       ),
     ),
   );
+}
+
+/// 服务器内消息搜索：输入关键词（跨频道），点结果跳转到原消息。
+Future<void> showSearchDialog(BuildContext context, String guildId) async {
+  await showDialog(
+    context: context,
+    builder: (_) => _SearchDialog(guildId: guildId),
+  );
+}
+
+class _SearchDialog extends ConsumerStatefulWidget {
+  final String guildId;
+  const _SearchDialog({required this.guildId});
+
+  @override
+  ConsumerState<_SearchDialog> createState() => _SearchDialogState();
+}
+
+class _SearchDialogState extends ConsumerState<_SearchDialog> {
+  final _ctl = TextEditingController();
+  Timer? _debounce;
+  bool _busy = false;
+  String _query = '';
+  List<Message> _results = const [];
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () => _search(v.trim()));
+  }
+
+  Future<void> _search(String q) async {
+    if (q.isEmpty) {
+      setState(() { _query = ''; _results = const []; _busy = false; });
+      return;
+    }
+    setState(() { _busy = true; _query = q; });
+    try {
+      final api = ref.read(apiProvider);
+      final res = await api!.searchMessages(widget.guildId, q);
+      if (!mounted) return;
+      setState(() => _results = res);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _results = const []);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _channelName(String channelId, ChatState chat) {
+    for (final chs in chat.channels.values) {
+      for (final c in chs) {
+        if (c.id == channelId) return '#${c.name}';
+      }
+    }
+    return '#频道';
+  }
+
+  String _fmt(DateTime t) {
+    final now = DateTime.now();
+    final hm = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    if (t.year == now.year && t.month == now.month && t.day == now.day) return '今天 $hm';
+    return '${t.month}/${t.day} $hm';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chat = ref.watch(chatProvider);
+    return AlertDialog(
+      backgroundColor: ChordColors.bgDarker,
+      title: const Text('搜索消息'),
+      content: SizedBox(
+        width: 560,
+        height: 460,
+        child: Column(
+          children: [
+            TextField(
+              controller: _ctl,
+              autofocus: true,
+              onChanged: _onChanged,
+              decoration: const InputDecoration(
+                hintText: '输入关键词，搜索当前服务器的所有频道',
+                prefixIcon: Icon(Icons.search, size: 20),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: _busy
+                  ? const Center(
+                      child: SizedBox(
+                          width: 22, height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2)))
+                  : _query.isEmpty
+                      ? const Center(
+                          child: Text('输入关键词开始搜索',
+                              style: TextStyle(color: ChordColors.textMuted, fontSize: 13)))
+                      : _results.isEmpty
+                          ? const Center(
+                              child: Text('没有找到匹配的消息',
+                                  style: TextStyle(color: ChordColors.textMuted, fontSize: 13)))
+                          : ListView.separated(
+                              itemCount: _results.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1, color: Color(0x14FFFFFF)),
+                              itemBuilder: (_, i) {
+                                final m = _results[i];
+                                final snippet =
+                                    m.content.replaceAll('\n', ' ').trim();
+                                return InkWell(
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    ref
+                                        .read(chatProvider.notifier)
+                                        .jumpToMessage(m.channelId, m.id);
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 8),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Text(_channelName(m.channelId, chat),
+                                                style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: ChordColors.blurple,
+                                                    fontWeight: FontWeight.w600)),
+                                            const SizedBox(width: 8),
+                                            Text(m.author?.username ?? '',
+                                                style: const TextStyle(
+                                                    fontSize: 12.5,
+                                                    fontWeight: FontWeight.w600)),
+                                            const SizedBox(width: 8),
+                                            Text(_fmt(m.createdAt),
+                                                style: const TextStyle(
+                                                    fontSize: 11.5,
+                                                    color: ChordColors.textMuted)),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          snippet.length > 120
+                                              ? '${snippet.substring(0, 120)}…'
+                                              : snippet,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                              fontSize: 13.5,
+                                              color: ChordColors.textNormal),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
+      ],
+    );
+  }
 }

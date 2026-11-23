@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-23（对应发布版本 **v1.3.9**，已上线）
+> 最后更新：2026-11-23（对应发布版本 **v1.4.0**，已上线）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.3.8.md](docs/RELEASE-v1.3.8.md)（旧版：v1.1.0）
@@ -309,6 +309,21 @@ UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob
 **注意**：线上升级后如果历史上确实存在重名，**后来注册的那个人会被改名**（如 `test_1234`），
 旧用户名将无法登录，需要用新名字登录（改名记录看 `journalctl -u chord-server | grep 重复用户名`）。
 
+### 阶段 15：v1.4.0（2026-11-23，品牌图标 + 消息搜索 + 跳转定位）
+
+| 项 | 内容 |
+|---|---|
+| App Logo | 按用户提供的图（白底 + 黑椭圆 + 两个蓝环）用 Pillow 矢量重绘（`K=1.2` 内边距），导出：Web `icons/Icon-192/512` + `favicon.png`、Android `mipmap-*/ic_launcher.png`、Windows `resources/app_icon.ico`（16–256 多尺寸，exe 与托盘共用）、应用内 `client/assets/logo.png`（登录页 + 服务器 rail 顶部） |
+| 消息搜索 | 后端 `GET /api/guilds/:id/search?q=`（成员校验；`INSTR(content,?)` 避免 % _ 通配；最多 50 条，时间倒序，`attachExtras` 补作者）；客户端 header/移动栏放大镜 → 搜索弹窗（350ms 防抖，显示 #频道、作者、时间、摘要），点击结果跨频道跳转并高亮 |
+| 跳转定位 | 后端 `GET /api/channels/:id/messages?around=<id>`（前 25 + 后 25，正序）；客户端 `jumpToMessage`：必要时切频道、加载上下文、按索引估算滚动 + `ensureVisible` 对齐、琥珀色高亮 2.5s。搜索结果与**引用回复块点击**共用这条链路 |
+| 桌面元数据 | `Runner.rc` 的 `FileDescription/ProductName` 由 `chord_client` 改为 `Chord`（任务栏/文件属性显示名） |
+
+验证：API 搜索 `提及`/`cooldown` 均返回跨频道结果、`around` 含目标且正序；UI 搜索弹窗结果正确、
+点击后跳到目标并高亮；引用块点击从最新消息跳到最早一条并高亮；移动端 390×844 顶栏出现搜索按钮；
+Windows/Android 构建通过（图标与 RC 编译无碍）。
+
+品牌色：logo 蓝 `#75CDFD`；manifest `theme_color` 改为该色、`background_color` 改白。
+
 ---
 
 ## 五、踩坑记录（重要！避免重蹈）
@@ -405,6 +420,14 @@ UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob
     Python 一行可算；目录里要有解压好的 `gradle-<ver>/` 和 `.ok` 标记）。预置后 wrapper 直接复用，
     **不要改仓库里的 `gradle-wrapper.properties`**（否则 CI 也会走镜像）。本机已同时为官方 URL
     （`aca6g93cdtcf0oapcfka748qh`）与腾讯镜像 URL（`1rsjz3joo2ioxecfvvnmxyd43`）各缓存了一份。
+
+36. **`SelectionArea` 会赢走子组件的 tap**：消息列表外层是 `SelectionArea`（跨消息选择），
+    引用块这种「文字区域里的可点元素」用 `InkWell.onTap` 收不到点击（选择手势在竞技场胜出）。
+    可靠做法是 `Listener(onPointerDown/onPointerUp)` 在原始指针层判定「按下→抬起位移 < 8px」= 点击。
+37. **reverse `ListView.builder` 懒加载导致 ensureVisible 无效**：目标消息若在视口外根本没被 build，
+    `GlobalKey.currentContext` 为 null，`Scrollable.ensureVisible` 什么也不会做（表现为"点了跳转但没反应"）。
+    做法：① 跳转时把 `cacheExtent` 临时放大（4000），让目标附近条目被构建；② 先按
+    `(len-1-index) * 平均高度` 估算 offset 粗跳，再 `ensureVisible` 精细对齐。
 
 35. **线上库存在混用排序规则（collation），手写 SQL 要防 1267**：本地库所有列都是
     `utf8mb4_unicode_ci`（GORM 按 DSN 建表），线上部分后建的表是 MySQL 8 默认的

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/app_state.dart';
 import '../theme.dart';
+import '../widgets/dialogs.dart';
 import '../widgets/member_list.dart';
 import '../widgets/panels.dart';
 import 'chat_area.dart';
@@ -177,6 +178,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 onOpenMembers: chat.guildId != null && !isDMChannel
                     ? _openMembersSheet
                     : null,
+                onSearch: chat.guildId != null && !isDMChannel
+                    ? () => showSearchDialog(context, chat.guildId!)
+                    : null,
               ),
               Expanded(child: chatArea),
             ],
@@ -231,6 +235,7 @@ class _MobileBar extends StatelessWidget {
   final bool isDM;
   final VoidCallback onOpenDrawer;
   final VoidCallback? onOpenMembers;
+  final VoidCallback? onSearch;
 
   const _MobileBar({
     required this.title,
@@ -238,6 +243,7 @@ class _MobileBar extends StatelessWidget {
     required this.isDM,
     required this.onOpenDrawer,
     this.onOpenMembers,
+    this.onSearch,
   });
 
   @override
@@ -282,6 +288,12 @@ class _MobileBar extends StatelessWidget {
               ],
             ),
           ),
+          if (onSearch != null)
+            IconButton(
+              icon: const Icon(Icons.search, size: 20),
+              tooltip: '搜索消息',
+              onPressed: onSearch,
+            ),
           if (onOpenMembers != null)
             IconButton(
               icon: const Icon(Icons.people_outline, size: 21),
