@@ -1,10 +1,11 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-24（v1.4.1 已开发完成待发布：Logo 加粗/圆角/橙底 + 12 项回归修复）
+> 最后更新：2026-11-24（发布版本 **v1.4.1**：新图标 + 12 项回归修复；线上服务器需执行
+> `update.sh server` + `update.sh web` 后才会变成 v1.4.1）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
-> ｜ [面向用户的发布说明 docs/RELEASE-v1.4.0.md](docs/RELEASE-v1.4.0.md)（历史：v1.3.8、v1.1.0）
+> ｜ [面向用户的发布说明 docs/RELEASE-v1.4.1.md](docs/RELEASE-v1.4.1.md)（历史：v1.4.0、v1.3.8、v1.1.0）
 > ｜ [部署说明 deploy/部署说明.md](deploy/部署说明.md)（发布包内还有一份）
 
 ---
