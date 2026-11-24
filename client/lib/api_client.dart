@@ -165,8 +165,10 @@ class ApiClient {
 
   // ---- messages ----
   /// 服务器内消息搜索（跨频道，最多 50 条，时间倒序）
-  Future<List<Message>> searchMessages(String guildId, String q) async =>
-      ((await _call('GET', '/guilds/$guildId/search', q: {'q': q})) as List)
+  /// [channelId] 非空时只搜该频道，否则搜整个服务器。
+  Future<List<Message>> searchMessages(String guildId, String q, {String? channelId}) async =>
+      ((await _call('GET', '/guilds/$guildId/search',
+              q: {'q': q, if (channelId != null) 'channelId': channelId})) as List)
           .map((e) => Message.fromJson(e))
           .toList();
 

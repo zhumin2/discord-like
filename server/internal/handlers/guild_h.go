@@ -73,9 +73,13 @@ func (s *Server) CreateGuild(c *gin.Context) {
 		if err := tx.Create(&models.GuildMember{GuildID: g.ID, UserID: uid, JoinedAt: time.Now()}).Error; err != nil {
 			return err
 		}
+		// 默认两个频道：公告（仅服务器创建者可发言）+ general（所有人可发言）。
+		// 老版本公告没设权限，等于所有人都能在公告里说话（用户反馈）。
 		defaults := []models.Channel{
-			{ID: models.NewID(), GuildID: g.ID, Name: "公告", Category: "信息", Position: 0},
-			{ID: models.NewID(), GuildID: g.ID, Name: "general", Category: "闲聊", Position: 1},
+			{ID: models.NewID(), GuildID: g.ID, Name: "公告", Category: "信息", Position: 0,
+				CreatedBy: uid, SpeakMode: models.SpeakOwner},
+			{ID: models.NewID(), GuildID: g.ID, Name: "general", Category: "闲聊", Position: 1,
+				CreatedBy: uid, SpeakMode: models.SpeakAll},
 		}
 		return tx.Create(&defaults).Error
 	})
@@ -269,7 +273,7 @@ func (s *Server) UpdateChannel(c *gin.Context) {
 	c.JSON(200, ch.DTO())
 }
 
-// DeleteChannel 删除频道（仅服务器所有者），级联删除消息与回应。
+// DeleteChannel 删除频道（频道创建者或服务器所有者），级联删除消息与回应。
 func (s *Server) DeleteChannel(c *gin.Context) {
 	uid := auth.UserID(c)
 	cid := c.Param("id")
@@ -284,8 +288,8 @@ func (s *Server) DeleteChannel(c *gin.Context) {
 	}
 	var g models.Guild
 	s.DB.Where("id = ?", ch.GuildID).First(&g)
-	if g.OwnerID != uid {
-		fail(c, 403, "仅服务器所有者可删除频道")
+	if g.OwnerID != uid && ch.CreatedBy != uid {
+		fail(c, 403, "只有频道创建者或服务器所有者可以删除频道")
 		return
 	}
 	s.DB.Where("channel_id = ?", cid).Delete(&models.Reaction{})

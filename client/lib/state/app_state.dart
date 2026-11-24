@@ -81,6 +81,14 @@ final gatewayProvider = Provider<Gateway?>((ref) {
   return gw;
 });
 
+/// 消息正文是否 @ 了 [username]。
+/// 半角 @ 与中文输入法的全角 ＠ 都算；要求名字后面不是用户名字符，
+/// 否则 @alice 会误命中 @alice2。
+bool mentionsUser(String content, String username) {
+  if (username.isEmpty) return false;
+  return RegExp('[@＠]${RegExp.escape(username)}(?![A-Za-z0-9_-])').hasMatch(content);
+}
+
 /// 聊天总状态。
 class ChatState {
   final User? me;
@@ -100,6 +108,7 @@ class ChatState {
   /// 别人在其它频道 @ 我时的提示文案（UI 弹 SnackBar 用）；mentionTick 每次+1 触发
   final String? mentionText;
   final int mentionTick;
+  final String? mentionChannelId; // 那次 @ 提示所在频道
   /// 跳转目标高亮（搜索结果/引用回复定位）；jumpTick 每次跳转 +1 触发滚动
   final String? highlightId;
   final int jumpTick;
@@ -121,6 +130,7 @@ class ChatState {
     this.members = const {},
     this.mentionText,
     this.mentionTick = 0,
+    this.mentionChannelId,
     this.highlightId,
     this.jumpTick = 0,
   });
@@ -144,6 +154,7 @@ class ChatState {
     Map<String, List<MemberInfo>>? members,
     String? mentionText,
     int? mentionTick,
+    String? mentionChannelId,
     String? highlightId,
     int? jumpTick,
     bool clearHighlight = false,
@@ -167,6 +178,7 @@ class ChatState {
       members: members ?? this.members,
       mentionText: mentionText ?? this.mentionText,
       mentionTick: mentionTick ?? this.mentionTick,
+      mentionChannelId: mentionChannelId ?? this.mentionChannelId,
       highlightId: clearHighlight ? null : (highlightId ?? this.highlightId),
       jumpTick: jumpTick ?? this.jumpTick,
     );
@@ -273,9 +285,9 @@ class ChatNotifier extends Notifier<ChatState> {
         guildId: guilds.isNotEmpty ? state.guildId ?? guilds.first.id : null,
       );
       if (state.channelId == null && guilds.isNotEmpty) {
-        final chs = channelsMap[guilds.first.id];
-        if (chs != null && chs.isNotEmpty) {
-          await selectChannel(chs.first.id);
+        final target = _preferredChannel(channelsMap[guilds.first.id]);
+        if (target != null) {
+          await selectChannel(target);
         }
       }
     } on ApiException catch (e) {
@@ -310,10 +322,20 @@ class ChatNotifier extends Notifier<ChatState> {
     if (state.members[guildId] == null) {
       _loadMembers(guildId);
     }
-    final chs = state.channels[guildId];
-    if (chs != null && chs.isNotEmpty) {
-      await selectChannel(chs.first.id);
+    final target = _preferredChannel(state.channels[guildId]);
+    if (target != null) {
+      await selectChannel(target);
     }
+  }
+
+  /// 进入服务器时默认落在哪个频道：第一个「所有人可发言」的频道（通常是 general），
+  /// 没有这样的频道才取第一个。公告频道默认只有创建者能发言，不适合当落地页。
+  String? _preferredChannel(List<Channel>? chs) {
+    if (chs == null || chs.isEmpty) return null;
+    for (final c in chs) {
+      if (c.speakMode == 'all') return c.id;
+    }
+    return chs.first.id;
   }
 
   void selectDMHome() {
@@ -811,15 +833,13 @@ class ChatNotifier extends Notifier<ChatState> {
       case 'MESSAGE_CREATE':
         final msg = Message.fromJson(ev.d);
         _appendMessage(msg);
+        final cur = state.summary[msg.channelId];
+        final me = state.me;
+        final mentioned = me != null && mentionsUser(msg.content, me.username);
         if (msg.channelId == state.channelId) {
           _markRead(msg.channelId);
         } else {
           // 未读 +1；@我 则 mentions +1
-          final cur = state.summary[msg.channelId];
-          final mentioned = state.me != null &&
-              (msg.content.contains('@${state.me!.username}') ||
-                  // 中文输入法可能敲出全角 ＠
-                  msg.content.contains('＠${state.me!.username}'));
           state = state.copyWith(summary: {
             ...state.summary,
             msg.channelId: ChannelSummary(
@@ -829,14 +849,15 @@ class ChatNotifier extends Notifier<ChatState> {
               mentions: (cur?.mentions ?? 0) + (mentioned ? 1 : 0),
             ),
           });
-          if (mentioned) {
-            // 被 @ 时给个即时提示（声音/桌面通知暂未做，先用 SnackBar）
-            final name = _channelDisplayName(msg.channelId);
-            state = state.copyWith(
-              mentionText: '${msg.author?.username ?? '有人'} 在 $name 提到了你',
-              mentionTick: state.mentionTick + 1,
-            );
-          }
+        // 被 @ 的即时提示：别的频道 → 顶部长提示；当前频道 → 消息行高亮，
+        // 若用户正往上翻看（不在底部）再补一条提示。自己 @ 自己不算。
+        if (mentioned && msg.authorId != me.id) {
+          state = state.copyWith(
+            mentionText: '${msg.author?.username ?? '有人'} 在 ${_channelDisplayName(msg.channelId)} 提到了你',
+            mentionTick: state.mentionTick + 1,
+            mentionChannelId: msg.channelId,
+          );
+        }
         }
       case 'MESSAGE_UPDATE':
         final m = Message.fromJson(ev.d);

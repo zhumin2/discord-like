@@ -64,6 +64,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // 别人在其它频道 @ 我：弹一条提示（mentionTick 每次提及 +1）
     ref.listen(chatProvider.select((s) => s.mentionTick), (prev, next) {
       if (next > (prev ?? 0)) {
+        // 当前频道里的 @ 由 ChatArea 处理（消息行高亮 / 不在底部时提示），这里只管别的频道
+        if (ref.read(chatProvider).mentionChannelId == ref.read(chatProvider).channelId) {
+          return;
+        }
         final text = ref.read(chatProvider).mentionText;
         if (text != null && text.isNotEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -179,7 +183,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     ? _openMembersSheet
                     : null,
                 onSearch: chat.guildId != null && !isDMChannel
-                    ? () => showSearchDialog(context, chat.guildId!)
+                    ? () => showSearchDialog(context, chat.guildId!,
+                        currentChannelId: chat.channelId)
                     : null,
               ),
               Expanded(child: chatArea),

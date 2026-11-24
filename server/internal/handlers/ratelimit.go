@@ -61,6 +61,27 @@ func newCooldownLimiter(interval time.Duration) *cooldownLimiter {
 	return &cooldownLimiter{interval: interval, last: map[string]time.Time{}}
 }
 
+// blocked 只判断不记录：距上次**成功**发言不足 interval 则为 true。
+func (l *cooldownLimiter) blocked(key string) bool {
+	if l.interval <= 0 {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t, ok := l.last[key]
+	return ok && time.Since(t) < l.interval
+}
+
+// mark 记录一次成功发言的时间。
+func (l *cooldownLimiter) mark(key string) {
+	if l.interval <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.last[key] = time.Now()
+}
+
 // allow 记录并判断：距上次发言不足 interval 则拒绝。
 func (l *cooldownLimiter) allow(key string) bool {
 	if l.interval <= 0 {

@@ -49,30 +49,74 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
-  <!-- 剪贴板图片粘贴（Web）：浏览器 FileReader 在 Dart 侧流事件不可靠，
+  <!-- 剪贴板图片/文件粘贴 + 拖放（Web）：浏览器 FileReader 在 Dart 侧流事件不可靠，
        这里在 JS 里读成 dataURL，再以自定义事件交给 Dart（见 clipboard_image_web.dart）。
-       纯文本粘贴不受影响（只在图片分支 preventDefault）。 -->
+       纯文本粘贴不受影响（只在文件分支 preventDefault）。 -->
   <script>
     (function () {
-      document.addEventListener('paste', function (e) {
-        var items = e.clipboardData && e.clipboardData.items;
-        if (!items) return;
-        for (var i = 0; i < items.length; i++) {
-          var it = items[i];
-          if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
-            var f = it.getAsFile();
-            if (!f) continue;
+      // 读取 FileList → [{name, type, dataUrl}]，全部完成后回调 JSON 字符串
+      function readFiles(fileList, cb) {
+        var out = [];
+        var pending = fileList.length;
+        if (!pending) return;
+        for (var i = 0; i < fileList.length; i++) {
+          (function (f) {
             var fr = new FileReader();
             fr.onloadend = function () {
-              window.dispatchEvent(new CustomEvent('chord-paste-image', {
-                detail: fr.result
-              }));
+              out.push({ name: f.name || 'file', type: f.type || '', dataUrl: fr.result });
+              if (--pending === 0) cb(JSON.stringify(out));
+            };
+            fr.onerror = function () {
+              if (--pending === 0) cb(JSON.stringify(out));
             };
             fr.readAsDataURL(f);
-            e.preventDefault();
-            return;
+          })(fileList[i]);
+        }
+      }
+
+      document.addEventListener('paste', function (e) {
+        var cd = e.clipboardData;
+        if (!cd) return;
+        var items = cd.items;
+        if (items) {
+          for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
+              var f = it.getAsFile();
+              if (!f) continue;
+              var fr = new FileReader();
+              fr.onloadend = function () {
+                window.dispatchEvent(new CustomEvent('chord-paste-image', {
+                  detail: fr.result
+                }));
+              };
+              fr.readAsDataURL(f);
+              e.preventDefault();
+              return;
+            }
           }
         }
+        // 资源管理器里 Ctrl+C 的文件（CF_HDROP → clipboardData.files）
+        if (cd.files && cd.files.length) {
+          e.preventDefault();
+          readFiles(cd.files, function (json) {
+            window.dispatchEvent(new CustomEvent('chord-paste-files', { detail: json }));
+          });
+        }
+      });
+
+      // 拖放文件进窗口：阻止浏览器默认（打开文件/跳转），读成 dataURL 交给 Dart 上传
+      window.addEventListener('dragover', function (e) {
+        e.preventDefault();
+      });
+      window.addEventListener('drop', function (e) {
+        var dt = e.dataTransfer;
+        if (!dt || !dt.files || !dt.files.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        readFiles(dt.files, function (json) {
+          window.dispatchEvent(new CustomEvent('chord-drop-files', { detail: json }));
+        });
       });
     })();
   </script>

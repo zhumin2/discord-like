@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../clipboard_image.dart' show DroppedFile;
 import '../file_picker.dart';
 import '../models.dart';
 import '../state/app_state.dart';
@@ -41,6 +43,7 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
   final _scrollCtl = ScrollController();
   Message? _replyTo; // 正在引用回复的消息（null=普通发送）
   String _selectedText = ''; // 当前选中的文本（跨消息选择，非空时显示「复制」按钮）
+  Timer? _clearSelTimer; // 选区清空后的延迟清除（见 onSelectionChanged 注释）
   final _jumpKey = GlobalKey(); // 跳转目标消息的定位锚点
   int _lastJumpTick = 0;
 
@@ -53,6 +56,7 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
 
   @override
   void dispose() {
+    _clearSelTimer?.cancel();
     _scrollCtl.dispose();
     super.dispose();
   }
@@ -105,9 +109,37 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
     });
 
     // 发言权限：DM 不限；频道按 speakMode 判定（服务器所有者恒可发言）
+    final channel = ch; // 供闭包使用的不可变引用（ch 在分支里赋值，不能被类型提升）
     final guild = chat.guilds.where((g) => g.id == chat.guildId).firstOrNull;
     final canSpeak =
         widget.isDM || (ch == null || ch.canSpeak(chat.me?.id ?? '', guild?.ownerId));
+    // 频道创建者或服务器所有者可改频道设置
+    final canManageChannel = !widget.isDM &&
+        ch != null &&
+        (ch.createdBy == chat.me?.id || guild?.ownerId == chat.me?.id);
+    // 当前频道被 @ 且正往上翻看（不在底部）：补一条提示；在底部时消息行高亮就够了
+    ref.listen(chatProvider.select((s) => s.mentionTick), (prev, next) {
+      if (next == prev) return;
+      final st = ref.read(chatProvider);
+      if (st.mentionChannelId != widget.channelId) return;
+      final away = _scrollCtl.hasClients && _scrollCtl.offset > 80;
+      if (!away) return;
+      final text = st.mentionText;
+      if (text == null || text.isEmpty || !mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.alternate_email, size: 16, color: Color(0xFFFFC857)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+      ));
+    });
+    // 当前频道里 @ 我的消息：整行高亮
+    final me = chat.me;
+    final mentionsMe = (Message m) => me != null && mentionsUser(m.content, me.username);
 
     return Column(
       children: [
@@ -136,17 +168,27 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                 const SizedBox(width: 10),
                 Container(width: 1, height: 18, color: const Color(0x33FFFFFF)),
                 const SizedBox(width: 10),
-                Flexible(
+                // 只占内容宽度，剩余空间全部让给后面的 Spacer（按钮才能贴右）
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 220),
                   child: Text(subtitle,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 12.5, color: ChordColors.textMuted)),
                 ),
               ],
               const Spacer(),
+              // 频道设置：选中时也要能点（之前齿轮只在未选中的行上出现）
+              if (canManageChannel && channel != null)
+                IconButton(
+                  icon: const Icon(Icons.settings_outlined, size: 19),
+                  onPressed: () => showChannelSettingsDialog(context, channel),
+                  tooltip: '频道设置',
+                ),
               if (!widget.isDM && chat.guildId != null)
                 IconButton(
                   icon: const Icon(Icons.search, size: 20),
-                  onPressed: () => showSearchDialog(context, chat.guildId!),
+                  onPressed: () => showSearchDialog(context, chat.guildId!,
+                      currentChannelId: widget.channelId),
                   tooltip: '搜索消息',
                 ),
               if (widget.onOpenMembers != null)
@@ -168,9 +210,23 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                 child: SelectionArea(
             // 选区变化 → 显示固定「复制」按钮（鼠标移动不会消失，v 反馈 5/9）
             onSelectionChanged: (content) {
-              final text = content?.plainText ?? '';
-              if (text != _selectedText) {
-                setState(() => _selectedText = text);
+              final text = _copyableSelection(content?.plainText ?? '');
+              if (text.isEmpty) {
+                // 点「复制所选」按钮时指针落在 SelectionArea 外，选区会先被清空
+                // （onSelectionChanged 收到空串），如果立刻销毁按钮状态，按钮的
+                // onPressed 读到的就是空文本 → 浏览器里表现为"点了复制但剪贴板为空"。
+                // 这里延迟清除，让这次点击先把内容复制走。
+                _clearSelTimer?.cancel();
+                _clearSelTimer = Timer(const Duration(milliseconds: 400), () {
+                  if (mounted && _selectedText.isNotEmpty) {
+                    setState(() => _selectedText = '');
+                  }
+                });
+              } else {
+                _clearSelTimer?.cancel();
+                if (text != _selectedText) {
+                  setState(() => _selectedText = text);
+                }
               }
             },
             contextMenuBuilder: (ctx, state) => _SelectionContextMenu(state: state),
@@ -221,6 +277,7 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                           compact: compact,
                           isMine: m.authorId == chat.me?.id,
                           highlighted: m.id == chat.highlightId,
+                          mentionsMe: mentionsMe(m),
                           onJumpToQuoted: (mid) => ref
                               .read(chatProvider.notifier)
                               .jumpToMessage(widget.channelId, mid),
@@ -255,7 +312,9 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       ),
                       onPressed: () async {
-                        await Clipboard.setData(ClipboardData(text: _selectedText));
+                        _clearSelTimer?.cancel();
+                        final textToCopy = _selectedText;
+                        await Clipboard.setData(ClipboardData(text: textToCopy));
                         if (!mounted) return;
                         setState(() => _selectedText = '');
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -306,15 +365,32 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
           onCancelReply: () => setState(() => _replyTo = null),
           onSend: (text) async {
             final replyId = _replyTo?.id;
-            await ref.read(chatProvider.notifier).send(widget.channelId, text, replyToId: replyId);
+            // send() 返回错误文案（如 429 发言太快）：交给 Composer 提示并把原文放回输入框
+            final err = await ref
+                .read(chatProvider.notifier)
+                .send(widget.channelId, text, replyToId: replyId);
             if (mounted) setState(() => _replyTo = null);
+            return err;
           },
           onTyping: () => ref.read(chatProvider.notifier).notifyTyping(widget.channelId),
           onAttach: () => _attachFile(),
           onPasteImage: _pasteImage,
+          onDropFiles: _uploadFiles,
         ),
       ],
     );
+  }
+
+  /// 把 SelectionArea 拼出来的选区文本整理成可读文本：
+  /// 消息正文尾部的零宽占位 → 换行；压缩连续空行；去掉首尾空白。
+  static String _copyableSelection(String raw) {
+    if (raw.isEmpty) return '';
+    final t = raw
+        .replaceAll('\u200B', '\n')
+        .replaceAll('\r\n', '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
+    return t;
   }
 
   /// 滚动到跳转目标（等列表渲染后）并清除高亮。
@@ -355,6 +431,16 @@ class _ChatAreaState extends ConsumerState<ChatArea> {
   Future<String?> _pasteImage(Uint8List bytes, String mime) async {
     final ext = mime.contains('png') ? 'png' : (mime.contains('webp') ? 'webp' : 'jpg');
     return _uploadBytes(bytes, 'clipboard.$ext');
+  }
+
+  /// 粘贴/拖放进来的文件（可能多个）：逐个走附件管线，拼接 Markdown。
+  Future<String?> _uploadFiles(List<DroppedFile> files) async {
+    final parts = <String>[];
+    for (final f in files) {
+      final md = await _uploadBytes(f.bytes, f.name, displayName: f.name);
+      if (md != null) parts.add(md);
+    }
+    return parts.isEmpty ? null : parts.join();
   }
 
   Future<String?> _uploadBytes(Uint8List bytes, String name, {String? displayName}) async {

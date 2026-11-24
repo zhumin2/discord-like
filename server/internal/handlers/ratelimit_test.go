@@ -83,3 +83,24 @@ func TestCooldownDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestCooldownBlockedDoesNotConsume(t *testing.T) {
+	l := newCooldownLimiter(50 * time.Millisecond)
+	if l.blocked("u1") {
+		t.Fatal("fresh key must not be blocked")
+	}
+	// 被拒绝的请求只查询不记录：连续查询多次也不应进入冷却
+	for i := 0; i < 5; i++ {
+		if l.blocked("u1") {
+			t.Fatal("blocked() must not start the cooldown")
+		}
+	}
+	l.mark("u1")
+	if !l.blocked("u1") {
+		t.Fatal("after mark the key must be blocked")
+	}
+	time.Sleep(60 * time.Millisecond)
+	if l.blocked("u1") {
+		t.Fatal("after interval the key must be allowed again")
+	}
+}

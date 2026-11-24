@@ -262,6 +262,9 @@ Future<void> showChannelSettingsDialog(BuildContext context, Channel channel) as
   final guild = chat.guilds.where((g) => g.id == channel.guildId).firstOrNull;
   final members = chat.members[channel.guildId] ?? const <MemberInfo>[];
 
+  // 频道创建者或服务器所有者可以删除频道
+  final canDelete = channel.createdBy == chat.me?.id || guild?.ownerId == chat.me?.id;
+
   final nameCtl = TextEditingController(text: channel.name);
   final mode = ValueNotifier<String>(channel.speakMode);
   final allowed = <String>{...channel.allowedSpeakers};
@@ -292,7 +295,7 @@ Future<void> showChannelSettingsDialog(BuildContext context, Channel channel) as
                     const Text('谁可以发言',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                     _modeTile('all', '所有人', Icons.public, mode, modeVal),
-                    _modeTile('owner', '仅我（创建者）· 公告频道', Icons.campaign, mode, modeVal),
+                    _modeTile('owner', '仅频道创建者（公告频道）', Icons.campaign, mode, modeVal),
                     _modeTile('custom', '我 + 指定成员', Icons.group, mode, modeVal),
                     _modeTile('none', '无人（归档）', Icons.lock_clock, mode, modeVal),
                     if (modeVal == 'custom') ...[
@@ -336,6 +339,16 @@ Future<void> showChannelSettingsDialog(BuildContext context, Channel channel) as
               ),
             ),
             actions: [
+              // 删除入口：以前只有"长按频道"这一条路径，桌面端基本发现不了
+              if (canDelete)
+                TextButton(
+                  style: TextButton.styleFrom(foregroundColor: ChordColors.red),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    showDeleteChannelDialog(context, channel);
+                  },
+                  child: const Text('删除频道'),
+                ),
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
               FilledButton(
                 onPressed: () async {
@@ -972,17 +985,19 @@ Future<void> showChangePasswordDialog(BuildContext context) async {
   );
 }
 
-/// 服务器内消息搜索：输入关键词（跨频道），点结果跳转到原消息。
-Future<void> showSearchDialog(BuildContext context, String guildId) async {
-  await showDialog(
-    context: context,
-    builder: (_) => _SearchDialog(guildId: guildId),
-  );
-}
+/// 服务器内消息搜索：可选「本频道 / 全服务器」，点结果跳转到原消息。
+/// [currentChannelId] 非空时默认搜本频道。
+Future<void> showSearchDialog(BuildContext context, String guildId,
+        {String? currentChannelId}) async =>
+    await showDialog(
+      context: context,
+      builder: (_) => _SearchDialog(guildId: guildId, currentChannelId: currentChannelId),
+    );
 
 class _SearchDialog extends ConsumerStatefulWidget {
   final String guildId;
-  const _SearchDialog({required this.guildId});
+  final String? currentChannelId;
+  const _SearchDialog({required this.guildId, this.currentChannelId});
 
   @override
   ConsumerState<_SearchDialog> createState() => _SearchDialogState();
@@ -994,6 +1009,14 @@ class _SearchDialogState extends ConsumerState<_SearchDialog> {
   bool _busy = false;
   String _query = '';
   List<Message> _results = const [];
+  /// 搜索范围：频道 id = 只搜该频道；null = 整个服务器
+  String? _scope;
+
+  @override
+  void initState() {
+    super.initState();
+    _scope = widget.currentChannelId; // 默认搜当前频道
+  }
 
   @override
   void dispose() {
@@ -1009,13 +1032,20 @@ class _SearchDialogState extends ConsumerState<_SearchDialog> {
 
   Future<void> _search(String q) async {
     if (q.isEmpty) {
-      setState(() { _query = ''; _results = const []; _busy = false; });
+      setState(() {
+        _query = '';
+        _results = const [];
+        _busy = false;
+      });
       return;
     }
-    setState(() { _busy = true; _query = q; });
+    setState(() {
+      _busy = true;
+      _query = q;
+    });
     try {
       final api = ref.read(apiProvider);
-      final res = await api!.searchMessages(widget.guildId, q);
+      final res = await api!.searchMessages(widget.guildId, q, channelId: _scope);
       if (!mounted) return;
       setState(() => _results = res);
     } catch (_) {
@@ -1045,24 +1075,57 @@ class _SearchDialogState extends ConsumerState<_SearchDialog> {
   @override
   Widget build(BuildContext context) {
     final chat = ref.watch(chatProvider);
+    final hasChannelScope = widget.currentChannelId != null;
+    final inChannel = _scope != null;
+    final scopeName = inChannel ? _channelName(_scope!, chat) : null;
+
     return AlertDialog(
       backgroundColor: ChordColors.bgDarker,
       title: const Text('搜索消息'),
       content: SizedBox(
         width: 560,
-        height: 460,
+        height: 500,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: _ctl,
-              autofocus: true,
-              onChanged: _onChanged,
-              decoration: const InputDecoration(
-                hintText: '输入关键词，搜索当前服务器的所有频道',
-                prefixIcon: Icon(Icons.search, size: 20),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _ctl,
+                    autofocus: true,
+                    onChanged: _onChanged,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      hintText: inChannel ? '在 $scopeName 中搜索' : '搜索整个服务器的所有频道',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // 范围：本频道 / 全服务器
+                SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  style: SegmentedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    selectedForegroundColor: ChordColors.textBright,
+                    selectedBackgroundColor: const Color(0x33FFFFFF),
+                  ),
+                  segments: [
+                    if (hasChannelScope)
+                      const ButtonSegment(value: true, label: Text('本频道', style: TextStyle(fontSize: 12.5))),
+                    const ButtonSegment(value: false, label: Text('全服务器', style: TextStyle(fontSize: 12.5))),
+                  ],
+                  selected: {inChannel},
+                  onSelectionChanged: (set) {
+                    final onlyChannel = set.first;
+                    setState(() => _scope = onlyChannel ? widget.currentChannelId : null);
+                    if (_query.isNotEmpty) _search(_query);
+                  },
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Expanded(
               child: _busy
                   ? const Center(
@@ -1070,63 +1133,67 @@ class _SearchDialogState extends ConsumerState<_SearchDialog> {
                           width: 22, height: 22,
                           child: CircularProgressIndicator(strokeWidth: 2)))
                   : _query.isEmpty
-                      ? const Center(
-                          child: Text('输入关键词开始搜索',
-                              style: TextStyle(color: ChordColors.textMuted, fontSize: 13)))
+                      ? Center(
+                          child: Text(
+                              inChannel ? '输入关键词，在 $scopeName 中搜索' : '输入关键词开始搜索',
+                              style: const TextStyle(color: ChordColors.textMuted, fontSize: 13)))
                       : _results.isEmpty
-                          ? const Center(
-                              child: Text('没有找到匹配的消息',
-                                  style: TextStyle(color: ChordColors.textMuted, fontSize: 13)))
+                          ? Center(
+                              child: Text(
+                                  inChannel
+                                      ? '$scopeName 里没有找到\n可以切换到「全服务器」再搜'
+                                      : '没有找到匹配的消息',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: ChordColors.textMuted, fontSize: 13, height: 1.6)))
                           : ListView.separated(
                               itemCount: _results.length,
                               separatorBuilder: (_, __) =>
                                   const Divider(height: 1, color: Color(0x14FFFFFF)),
                               itemBuilder: (_, i) {
                                 final m = _results[i];
-                                final snippet =
-                                    m.content.replaceAll('\n', ' ').trim();
+                                final snippet = m.content.replaceAll('\n', ' ').trim();
                                 return InkWell(
                                   onTap: () {
                                     Navigator.pop(context);
-                                    ref
-                                        .read(chatProvider.notifier)
-                                        .jumpToMessage(m.channelId, m.id);
+                                    ref.read(chatProvider.notifier).jumpToMessage(m.channelId, m.id);
                                   },
                                   child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Row(
                                           children: [
-                                            Text(_channelName(m.channelId, chat),
-                                                style: const TextStyle(
-                                                    fontSize: 12,
-                                                    color: ChordColors.blurple,
-                                                    fontWeight: FontWeight.w600)),
-                                            const SizedBox(width: 8),
+                                            // 只搜本频道时不重复显示频道名
+                                            if (!inChannel) ...[
+                                              Text(_channelName(m.channelId, chat),
+                                                  style: const TextStyle(
+                                                      fontSize: 12,
+                                                      color: ChordColors.blurple,
+                                                      fontWeight: FontWeight.w600)),
+                                              const SizedBox(width: 8),
+                                            ],
                                             Text(m.author?.username ?? '',
                                                 style: const TextStyle(
-                                                    fontSize: 12.5,
-                                                    fontWeight: FontWeight.w600)),
+                                                    fontSize: 12.5, fontWeight: FontWeight.w600)),
                                             const SizedBox(width: 8),
                                             Text(_fmt(m.createdAt),
                                                 style: const TextStyle(
-                                                    fontSize: 11.5,
-                                                    color: ChordColors.textMuted)),
+                                                    fontSize: 11.5, color: ChordColors.textMuted)),
+                                            if (m.channelId == widget.currentChannelId && !inChannel) ...[
+                                              const SizedBox(width: 6),
+                                              const Text('当前频道',
+                                                  style: TextStyle(
+                                                      fontSize: 10.5, color: ChordColors.textMuted)),
+                                            ],
                                           ],
                                         ),
                                         const SizedBox(height: 3),
                                         Text(
-                                          snippet.length > 120
-                                              ? '${snippet.substring(0, 120)}…'
-                                              : snippet,
+                                          snippet.length > 120 ? '${snippet.substring(0, 120)}…' : snippet,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                              fontSize: 13.5,
-                                              color: ChordColors.textNormal),
+                                          style: const TextStyle(fontSize: 13.5, color: ChordColors.textNormal),
                                         ),
                                       ],
                                     ),

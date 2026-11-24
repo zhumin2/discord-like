@@ -99,11 +99,16 @@ func (s *Server) requireSendCooldown(c *gin.Context) {
 	if uid == "" {
 		uid = c.ClientIP()
 	}
-	if !s.msgCooldown.allow(uid) {
+	if s.msgCooldown.blocked(uid) {
 		c.AbortWithStatusJSON(429, gin.H{"error": "发言太快，请稍候再发"})
 		return
 	}
 	c.Next()
+	// 只有真正发成功才计入冷却：被 403 拒绝（如公告频道无权发言）不应占用配额，
+	// 否则用户切到普通频道马上发言会被误判为"发言太快"
+	if c.Writer.Status() < 400 {
+		s.msgCooldown.mark(uid)
+	}
 }
 
 func (s *Server) cors() gin.HandlerFunc {

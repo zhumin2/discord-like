@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models.dart';
 import '../theme.dart';
@@ -17,6 +18,7 @@ class MessageTile extends StatefulWidget {
   final void Function(String messageId)? onJumpToQuoted; // 点击引用块跳转
   final String Function(String url)? resolveUrl; // 相对 URL 解析（v1.1 图片）
   final bool highlighted; // 跳转定位时短暂高亮
+  final bool mentionsMe; // 这条消息 @ 了我（整行淡黄底 + 左侧色条）
 
   const MessageTile({
     super.key,
@@ -30,6 +32,7 @@ class MessageTile extends StatefulWidget {
     this.onJumpToQuoted,
     this.resolveUrl,
     this.highlighted = false,
+    this.mentionsMe = false,
   });
 
   @override
@@ -37,9 +40,13 @@ class MessageTile extends StatefulWidget {
 }
 
 class _MessageTileState extends State<MessageTile> {
-  bool _hover = false;
+  /// 悬停状态用 ValueNotifier 而不是 setState：鼠标划过时只有背景和操作条重建，
+  /// 消息正文（包括正在编辑的输入框）完全不会 rebuild。
+  /// 之前整行随 hover 重建，正在编辑的输入框会被打断（用户反馈"鼠标一动就丢失输入点"）。
+  final _hover = ValueNotifier<bool>(false);
   bool _editing = false;
-  late TextEditingController _editCtl;
+  late final TextEditingController _editCtl;
+  late final FocusNode _editFocus;
 
   static const pickerEmojis = [
     '👍', '❤️', '😂', '🎉', '👀', '🤔', '🚀', '🔥', '👏', '😅', '😭', '🤝', '✅', '❌', '🙏', '💯',
@@ -49,12 +56,57 @@ class _MessageTileState extends State<MessageTile> {
   void initState() {
     super.initState();
     _editCtl = TextEditingController(text: widget.msg.content);
+    _editFocus = FocusNode(debugLabel: 'message-editor')..onKeyEvent = _onEditKey;
   }
 
   @override
   void dispose() {
+    _hover.dispose();
     _editCtl.dispose();
+    _editFocus.dispose();
     super.dispose();
+  }
+
+  /// 编辑框按键：回车保存，Shift+回车换行，Esc 取消。
+  /// 输入法组字（选候选词）时的回车不处理。
+  KeyEventResult _onEditKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || !_editing) return KeyEventResult.ignored;
+    final composing = _editCtl.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return KeyEventResult.ignored;
+    final k = event.logicalKey;
+    final shift = HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.shiftLeft) ||
+        HardwareKeyboard.instance.isLogicalKeyPressed(LogicalKeyboardKey.shiftRight);
+    if (k == LogicalKeyboardKey.enter && !shift) {
+      _commitEdit();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.escape) {
+      _cancelEdit();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _startEdit() {
+    _editCtl.text = widget.msg.content;
+    _editCtl.selection =
+        TextSelection.collapsed(offset: _editCtl.text.length);
+    setState(() => _editing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _editing) _editFocus.requestFocus();
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() => _editing = false);
+  }
+
+  void _commitEdit() {
+    final text = _editCtl.text;
+    setState(() => _editing = false);
+    // 内容没变或被清空：不提交（空消息后端会 400）
+    if (text.trim().isEmpty || text.trim() == widget.msg.content.trim()) return;
+    widget.onEdit(widget.msg.id, text);
   }
 
   void _showReactionPicker() {
@@ -124,36 +176,43 @@ class _MessageTileState extends State<MessageTile> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Avatar(name: m.author?.username ?? '?',
-                    colorHex: m.author?.avatarColor ?? '#5865F2',
-                    imageUrl: m.author?.avatarUrl),
+                // 头像字母、名字、时间戳不参与跨消息选择：它们夹在正文之间会让
+                // 选择范围的几何排序错乱（表现为从下往上拖选不到别的作者的消息），
+                // 复制出来也会混进 "Aalice2026/11/19 10:18" 这类元数据。
+                SelectionContainer.disabled(
+                  child: Avatar(name: m.author?.username ?? '?',
+                      colorHex: m.author?.avatarColor ?? '#5865F2',
+                      imageUrl: m.author?.avatarUrl),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              m.author?.username ?? '未知用户',
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: widget.isMine
-                                    ? ChordColors.textBright
-                                    : _authorColor(m.authorId),
+                      SelectionContainer.disabled(
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                m.author?.username ?? '未知用户',
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: widget.isMine
+                                      ? ChordColors.textBright
+                                      : _authorColor(m.authorId),
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(timeStr,
-                              style: const TextStyle(
-                                  fontSize: 11, color: ChordColors.textMuted)),
-                        ],
+                            const SizedBox(width: 6),
+                            Text(timeStr,
+                                style: const TextStyle(
+                                    fontSize: 11, color: ChordColors.textMuted)),
+                          ],
+                        ),
                       ),
-                      if (quote != null) quote,
+                      if (quote != null) SelectionContainer.disabled(child: quote),
                       content,
                     ],
                   ),
@@ -163,24 +222,47 @@ class _MessageTileState extends State<MessageTile> {
           );
 
     final reactions = m.reactions;
+
+    // 行背景：被 @ 我的消息常驻淡黄底 + 左侧色条；跳转高亮优先；悬停再深一点
+    Color? bg;
+    Border? border;
+    if (widget.highlighted) {
+      bg = const Color(0x33FFC857);
+    } else if (widget.mentionsMe) {
+      bg = const Color(0x1EFAA61A);
+      border = const Border(left: BorderSide(color: Color(0xFFFAA61A), width: 2));
+    }
+
     return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
+      onEnter: (_) => _hover.value = true,
+      onExit: (_) => _hover.value = false,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
-            color: widget.highlighted
-                ? const Color(0x33FFC857)
-                : (_hover ? const Color(0x0DFFFFFF) : null),
-            padding: const EdgeInsets.only(top: 2, bottom: 2),
+          // child 参数里的正文不随悬停重建
+          ValueListenableBuilder<bool>(
+            valueListenable: _hover,
+            builder: (context, hover, child) => Container(
+              decoration: BoxDecoration(
+                color: hover
+                    ? Color.alphaBlend(const Color(0x0DFFFFFF), bg ?? const Color(0x00000000))
+                    : bg,
+                border: border,
+              ),
+              padding: const EdgeInsets.only(top: 2, bottom: 2),
+              child: child,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 body,
+                // 回应徽章只在已有回应时占位。
+                // 不能在悬停时插入"添加回应"芯片：那会改变行高、把后面的消息整体
+                // 推移，鼠标拖选跨消息时选区会被打断（用户反馈只能选同一个人）。
+                // 添加回应入口保留在悬浮操作条的第一个按钮上。
                 if (reactions.isNotEmpty)
                   Padding(
-                    padding: EdgeInsets.only(left: widget.compact ? 68 : 68, top: 4),
+                    padding: const EdgeInsets.only(left: 68, top: 4),
                     child: Wrap(
                       spacing: 6,
                       runSpacing: 6,
@@ -189,31 +271,31 @@ class _MessageTileState extends State<MessageTile> {
                           _ReactionChip(
                               summary: r,
                               onTap: () => widget.onToggleReaction(m.id, r.emoji)),
-                        if (_hover) _AddReactionChip(onTap: _showReactionPicker),
                       ],
                     ),
                   ),
               ],
             ),
           ),
-          // 悬浮操作条
-          if (_hover && !_editing)
-            Positioned(
-              right: 40,
-              top: widget.compact ? -10 : -2,
-              child: _ActionBar(
-                isMine: widget.isMine,
-                onReact: _showReactionPicker,
-                onReply: widget.onReply == null ? null : () => widget.onReply!(widget.msg),
-                onEdit: widget.isMine
-                    ? () => setState(() {
-                          _editCtl.text = widget.msg.content;
-                          _editing = true;
-                        })
-                    : null,
-                onDelete: widget.isMine ? _confirmDelete : null,
-              ),
-            ),
+          // 悬浮操作条（编辑时隐藏，避免挡住输入框）
+          ValueListenableBuilder<bool>(
+            valueListenable: _hover,
+            builder: (context, hover, _) => (hover && !_editing)
+                ? Positioned(
+                    right: 40,
+                    top: widget.compact ? -10 : -2,
+                    child: _ActionBar(
+                      isMine: widget.isMine,
+                      onReact: _showReactionPicker,
+                      onReply: widget.onReply == null
+                          ? null
+                          : () => widget.onReply!(widget.msg),
+                      onEdit: widget.isMine ? _startEdit : null,
+                      onDelete: widget.isMine ? _confirmDelete : null,
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -242,40 +324,59 @@ class _MessageTileState extends State<MessageTile> {
   Widget _buildEditor() {
     return Padding(
       padding: const EdgeInsets.only(top: 4, right: 8),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _editCtl,
-              autofocus: true,
-              maxLines: null,
-              style: const TextStyle(fontSize: 15, color: ChordColors.textNormal),
-              decoration: const InputDecoration(
-                hintText: '编辑消息，回车保存',
-                isDense: true,
+          TextField(
+            controller: _editCtl,
+            focusNode: _editFocus,
+            maxLines: null,
+            style: const TextStyle(fontSize: 15, color: ChordColors.textNormal),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(6)),
+                borderSide: BorderSide(color: ChordColors.blurple),
               ),
-              onSubmitted: (v) {
-                widget.onEdit(widget.msg.id, v);
-                setState(() => _editing = false);
-              },
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(6)),
+                borderSide: BorderSide(color: ChordColors.blurple),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(6)),
+                borderSide: BorderSide(color: ChordColors.blurple, width: 1.6),
+              ),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),
           ),
-          TextButton(
-            onPressed: () => setState(() => _editing = false),
-            child: const Text('取消',
-                style: TextStyle(color: ChordColors.textMuted)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: ChordColors.blurple,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              minimumSize: const Size(0, 34),
-            ),
-            onPressed: () {
-              widget.onEdit(widget.msg.id, _editCtl.text);
-              setState(() => _editing = false);
-            },
-            child: const Text('确定', style: TextStyle(fontSize: 13)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: _cancelEdit,
+                child: const Text('取消',
+                    style: TextStyle(color: ChordColors.textMuted, fontSize: 13)),
+              ),
+              const SizedBox(width: 6),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: ChordColors.blurple,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: _commitEdit,
+                child: const Text('保存', style: TextStyle(fontSize: 13)),
+              ),
+              const SizedBox(width: 10),
+              const Text('回车保存 · Shift+回车换行 · Esc 取消',
+                  style: TextStyle(fontSize: 11, color: ChordColors.textMuted)),
+            ],
           ),
         ],
       ),
@@ -391,28 +492,6 @@ class _ReactionChip extends StatelessWidget {
                     color: active ? ChordColors.mentionText : ChordColors.textMuted)),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _AddReactionChip extends StatelessWidget {
-  final VoidCallback onTap;
-  const _AddReactionChip({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2B2D31),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Icon(Icons.add_reaction_outlined,
-            size: 15, color: ChordColors.textMuted),
       ),
     );
   }

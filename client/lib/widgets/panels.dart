@@ -317,12 +317,14 @@ class _ChannelTile extends ConsumerWidget {
     final mentions = summary?.mentions ?? 0;
     final chat = ref.watch(chatProvider);
     final isOwner = chat.guilds.where((g) => g.id == guildId).firstOrNull?.ownerId == chat.me?.id;
-    // 频道创建者或服务器所有者可打开频道设置（改名/发言权限）
+    // 频道创建者或服务器所有者可打开频道设置（改名/发言权限/删除）
     final canManage = isOwner || channel.createdBy == chat.me?.id;
+    final canDelete = canManage;
 
     return InkWell(
       onTap: () => ref.read(chatProvider.notifier).selectChannel(channel.id),
-      onLongPress: isOwner
+      // 长按删除（移动端）：频道创建者或服务器所有者；桌面端入口在频道设置里
+      onLongPress: canDelete
           ? () => showDeleteChannelDialog(context, channel)
           : null,
       child: Container(
@@ -355,13 +357,17 @@ class _ChannelTile extends ConsumerWidget {
                     : '发言受限的频道',
                 child: Icon(Icons.lock_outline, size: 12, color: ChordColors.textMuted),
               ),
-            // 齿轮：频道设置（创建者/服主）；删除仍走长按，避免每行堆三个图标
-            if (canManage && !selected)
-              InkWell(
-                onTap: () => showChannelSettingsDialog(context, channel),
-                child: const Padding(
-                  padding: EdgeInsets.all(3),
-                  child: Icon(Icons.settings_outlined, size: 14, color: ChordColors.textMuted),
+            // 齿轮：频道设置。选中时也要显示——之前只在未选中的行上出现，
+            // 想改 A 频道的设置必须先点去 B 频道（用户反馈）
+            if (canManage)
+              Tooltip(
+                message: '频道设置',
+                child: InkWell(
+                  onTap: () => showChannelSettingsDialog(context, channel),
+                  child: const Padding(
+                    padding: EdgeInsets.all(3),
+                    child: Icon(Icons.settings_outlined, size: 14, color: ChordColors.textMuted),
+                  ),
                 ),
               ),
             if (mentions > 0)

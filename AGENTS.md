@@ -1,7 +1,7 @@
 # AGENTS.md — Chord 项目交接文档
 
 > 面向接手本项目的 AI agent / 开发者：项目全貌、**完整历史**、线上运行事实、已知坑、资产与发布流程。
-> 最后更新：2026-11-23（对应发布版本 **v1.4.0**，已上线）
+> 最后更新：2026-11-24（v1.4.1 已开发完成待发布：Logo 加粗/圆角/橙底 + 12 项回归修复）
 >
 > 📌 配套文档：[产品规格 docs/PRD.md](docs/PRD.md) ｜ [开发路线图 docs/ROADMAP.md](docs/ROADMAP.md)
 > ｜ [面向用户的发布说明 docs/RELEASE-v1.4.0.md](docs/RELEASE-v1.4.0.md)（历史：v1.3.8、v1.1.0）
@@ -22,8 +22,10 @@
 | 命令行管理 | Git Bash 脚本 | `chord.sh start/stop/restart/status/logs` |
 
 **已实现功能**：注册登录(JWT)、服务器/邀请码、频道分组、实时消息(WS)、编辑删除、Markdown-lite、
-@提及、表情回应、私信 DM、在线状态、typing 提示、未读/提及数、响应式(四栏/单栏+抽屉)、PWA、
-**图片/文件上传（v1.1）**、**限流（v1.1）**、**gzip 压缩（v1.1）**。
+@提及（整行高亮+提示）、表情回应、私信 DM、在线状态、typing 提示、未读/提及数、响应式(四栏/单栏+抽屉)、PWA、
+**图片/文件上传（v1.1）**、**限流（v1.1）**、**gzip 压缩（v1.1）**、
+**消息搜索/跳转定位（v1.4）**、**频道发言权限/改名/删除（v1.3.5+）**、**禁言提示**、
+**粘贴/拖放文件（v1.4.1）**、**跨消息选择复制（v1.3.5+）**、**头像上传/压缩/缓存**。
 
 **演示账号**：alice / bob / carol，密码均 `123456`；演示服务器邀请码 `demo2024`。
 
@@ -309,6 +311,29 @@ UI（头像改成红色后消息/成员/底栏即时变色、@bo + Tab → "@bob
 **注意**：线上升级后如果历史上确实存在重名，**后来注册的那个人会被改名**（如 `test_1234`），
 旧用户名将无法登录，需要用新名字登录（改名记录看 `journalctl -u chord-server | grep 重复用户名`）。
 
+### 阶段 17：v1.4.1 回归修复（2026-11-24，12 项用户反馈）
+
+v1.4.0 上线后用户列出 12 项回归/新问题，全部修复并用 `scripts/guitest/v141_regression.mjs`
+（无头 Edge，全新测试用户 + 独立服务器）逐项验证 **ALL PASS**：
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | @ 我没提示 | 消息行整行淡黄底 + 左侧橙色竖条；当前频道内、且用户不在底部时补 SnackBar；`mentionsUser` 支持全角 `＠` |
+| 2 | 资源管理器 Ctrl+C 文件 → Ctrl+V 无反应；不支持拖动 | Windows 原生读 `CF_HDROP`（`readClipboardFiles` / Ctrl+V 时 `onClipboardFiles`）并子类化 Flutter 子窗口处理 `WM_DROPFILES`（`onDroppedFiles`）；Web 在 `index.html` 监听 paste/drop 读成 dataURL 派发 `chord-paste-files` / `chord-drop-files`；统一走附件压缩上传管线并插入 Markdown |
+| 3 | 编辑回车是换行 | 编辑框 `FocusNode.onKeyEvent`：回车保存（IME 组字中忽略）、Shift+回车换行、Esc 取消；提示语改为「回车保存 · Shift+回车换行 · Esc 取消」 |
+| 4 | 无法跨作者拖选多行 | 头像/作者名/时间/引用块包 `SelectionContainer.disabled`；每条消息正文尾部加零宽占位（复制时转成换行）；**悬停不再插入「添加回应」芯片**（行高变化会打断拖选）；修复「点复制按钮先清空选区→剪贴板为空」 |
+| 5 | 新服务器默认落在公告、且公告所有人可发言 | 服务端建服默认「公告(owner) + general(all)」；客户端 `_preferredChannel` 优先选 `speakMode=all` 的频道 |
+| 6 | 搜索按钮在中间 | 头部副标题 `ConstrainedBox(maxWidth:220)`，让 `Spacer` 生效把按钮推到最右 |
+| 7 | 搜索是全量、不能指定频道 | 搜索弹窗加「本频道 / 全服务器」SegmentedButton（默认本频道）；后端 `GET /guilds/:id/search?channelId=` 校验频道归属 |
+| 8 | 编辑时鼠标一动就丢输入点 | 悬停状态改用 `ValueNotifier`，正文作为 `ValueListenableBuilder` 的 child 不随 hover 重建（TextField 不重建） |
+| 9 | 选中频道后编辑齿轮消失 | `_ChannelTile` 齿轮去掉 `&& !selected`，选中行也显示（并加 Tooltip「频道设置」） |
+| 10 | 被禁言成员无提示 | 成员头像左下角叠 `mic_off` 红标 + Tooltip（仅在 owner/custom 频道模式逐个标记；all/none 不标） |
+| 11 | 无法删除频道 | 频道设置弹窗加红色「删除频道」（创建者/服主可见）+ 长按删除；后端 `DeleteChannel` 由「仅服主」放宽为「创建者或服主」 |
+| 12 | 选择文件点取消报错 | 根因：部分浏览器取消时派发 `change` 且 `files` 为空列表，`List.first` 抛 `Bad state: No element`；改为判空 + cancel 事件 + window focus 兜底，取消返回 null 不提示 |
+
+附带修复：`SendMessage` 的 429 文案现在能真正回到输入框（ChatArea 的 `onSend` 之前丢弃了 `send()` 返回值）；
+发言冷却只对成功请求计时（403 不占配额，单测 `TestCooldownBlockedDoesNotConsume`）。
+
 ### 阶段 16：v1.4.1（2026-11-23，Logo 线条加粗）
 
 用户反馈 v1.4.0 的图标"线条太细"，随后补充"图标应该是圆角矩形"。最终方案：
@@ -440,6 +465,25 @@ Windows/Android 构建通过（图标与 RC 编译无碍）。
     `GlobalKey.currentContext` 为 null，`Scrollable.ensureVisible` 什么也不会做（表现为"点了跳转但没反应"）。
     做法：① 跳转时把 `cacheExtent` 临时放大（4000），让目标附近条目被构建；② 先按
     `(len-1-index) * 平均高度` 估算 offset 粗跳，再 `ensureVisible` 精细对齐。
+
+38. **Web 取消文件选择会走 `change` 且 `files` 是空列表**：`await input.onChange.first` 拿到事件后
+    直接 `input.files!.first` 会抛 `Bad state: No element`（用户看到的就是"点取消弹报错"）。
+    必须 `files == null || files.isEmpty → null`；另外 cancel 事件（Chrome 113+）与 window focus
+    都只是兜底，真正可靠的是 change 里判空。`finish()` 里要先 `completer.complete` 再清理 DOM，
+    否则清理抛异常会让 Future 永远挂起（附件按钮一直转圈）。
+39. **Windows 文件拖放的 `WM_DROPFILES` 发给鼠标下的子窗口**：Flutter 的视图是独立子 HWND，
+    `FlutterWindow::MessageHandler`（顶层）收不到。做法：`DragAcceptFiles(view, TRUE)` +
+    `SetWindowSubclass(view, ...)`，在子类过程里处理并 `DragFinish`，其余 `DefSubclassProc` 转回引擎；
+    需要链接 `shell32.lib` / `comctl32.lib`。剪贴板里的文件用 `CF_HDROP` + `DragQueryFileW` 读路径
+    （资源管理器 Ctrl+C 不会给 `CF_DIB`，所以图片读取失败后要再试文件）。
+40. **悬停时改变行高会打断拖选**：消息行 hover 时插入「添加回应」芯片会让后面的消息整体位移，
+    鼠标拖选跨消息时选区在位移瞬间断掉（用户表现为"只能选同一个人"）。凡是 hover 态，
+    **只改颜色/叠浮层，不要插入占位组件**（同坑 32 的布局稳定原则）；添加入口放到悬浮操作条。
+41. **浮动「复制所选」按钮会先清空选区**：按钮在 SelectionArea 外，pointerDown 会先触发
+    `onSelectionChanged`（空串），如果立刻 `setState(_selectedText='')`，随后 onPressed 复制的就是空串
+    （浏览器里表现为"复制了个寂寞"）。做法：空串到来时延迟 400ms 再清除，点击时先取消延迟再复制。
+    自动化验证：Playwright 里模拟拖选时，**纯垂直移动**不会扩展跨 RichText 的选区终点，
+    路径里要有水平分量（真实用户斜向拖动不受影响）。
 
 35. **线上库存在混用排序规则（collation），手写 SQL 要防 1267**：本地库所有列都是
     `utf8mb4_unicode_ci`（GORM 按 DSN 建表），线上部分后建的表是 MySQL 8 默认的
@@ -613,7 +657,11 @@ for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code} " -X POST <api>/a
 ## 九、验证方式
 
 - **后端冒烟**：`cmd/redisprobe`（presence 键）、`curl /api/health`、`go test ./internal/handlers/`
-- **GUI 黑盒**：`scripts/guitest/walk.mjs` / `final-walk.mjs`（双账号实时消息、双视口、截图）
+- **GUI 黑盒**：`scripts/guitest/walk.mjs` / `final-walk.mjs`（双账号实时消息、双视口、截图）；
+  `v141_regression.mjs`（12 项回归：默认频道/搜索范围/齿轮与删除/禁言图标/编辑回车/跨作者选择/
+  粘贴与拖放/取消选择文件，无头 Edge 全自动断言）
+- 跑 v141_regression 前先确保本机 server(8081) + serveweb(3000) 在跑；脚本会注册临时用户和独立服务器，
+  每项都打印 PASS/FAIL，最后输出 ALL PASS / N FAILURES
 - **全链路**：浏览器登录不同演示账号互发消息；移动端 375×812 视口 + 抽屉
 - **无头浏览器**：先 `dispatchEvent(click)` 激活 `flt-semantics-placeholder`；`fill()` 对 Flutter 输入框无效
 - 跑 GUI 测试前 `cd scripts/guitest && npm i`（playwright-core + 系统 Edge）

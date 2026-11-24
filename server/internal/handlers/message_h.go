@@ -202,7 +202,8 @@ func (s *Server) ListMessages(c *gin.Context) {
 	c.JSON(200, msgs)
 }
 
-// SearchGuildMessages 在服务器所有频道里搜索消息内容，按时间倒序返回（最多 50 条）。
+// SearchGuildMessages 搜索消息内容，按时间倒序返回（最多 50 条）。
+// 带 channelId 时只搜该频道，否则搜整个服务器。
 // 用 INSTR 而不是 LIKE，避免用户输入 % _ \ 被当成通配符。
 func (s *Server) SearchGuildMessages(c *gin.Context) {
 	uid := auth.UserID(c)
@@ -226,8 +227,26 @@ func (s *Server) SearchGuildMessages(c *gin.Context) {
 		c.JSON(200, []models.Message{})
 		return
 	}
+	// channelId：只搜某个频道（必须是该服务器下的频道）
+	qry := s.DB
+	if cid := strings.TrimSpace(c.Query("channelId")); cid != "" {
+		allowed := false
+		for _, id := range channelIDs {
+			if id == cid {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			fail(c, 404, "频道不存在")
+			return
+		}
+		qry = qry.Where("channel_id = ?", cid)
+	} else {
+		qry = qry.Where("channel_id IN ?", channelIDs)
+	}
 	var msgs []models.Message
-	if err := s.DB.Where("channel_id IN ?", channelIDs).
+	if err := qry.
 		Where("INSTR(content, ?) > 0", q).
 		Order("id DESC").Limit(50).Find(&msgs).Error; err != nil {
 		fail(c, 500, "搜索失败")

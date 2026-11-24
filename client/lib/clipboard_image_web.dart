@@ -1,6 +1,7 @@
 // Web 平台：粘贴由 index.html 的 JS 监听（FileReader → dataURL → 自定义事件），
 // 复制用 navigator.clipboard + ClipboardItem。
 // ignore_for_file: avoid_web_libraries_in_flutter
+import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:js' as js;
@@ -27,6 +28,42 @@ Unregister registerPasteImage(void Function(Uint8List bytes, String mime) onImag
     } catch (_) {}
   });
   return sub.cancel;
+}
+
+/// 监听「粘贴文件」（资源管理器 Ctrl+C → 页面 Ctrl+V）与「拖放文件」：
+/// index.html 把每个文件读成 dataURL，detail 是 JSON 数组字符串。
+Unregister registerDroppedFiles(DroppedFilesHandler onFiles) {
+  final subs = <StreamSubscription>[];
+  for (final eventName in const ['chord-paste-files', 'chord-drop-files']) {
+    subs.add(html.window.on[eventName].listen((html.Event raw) {
+      final detail = (raw as html.CustomEvent).detail?.toString();
+      if (detail == null || detail.isEmpty) return;
+      List<dynamic> list;
+      try {
+        list = jsonDecode(detail) as List<dynamic>;
+      } catch (_) {
+        return;
+      }
+      final files = <DroppedFile>[];
+      for (final e in list) {
+        if (e is! Map) continue;
+        final dataUrl = e['dataUrl']?.toString() ?? '';
+        final comma = dataUrl.indexOf(',');
+        if (comma < 0) continue;
+        try {
+          files.add(DroppedFile(
+              e['name']?.toString() ?? 'file',
+              base64Decode(dataUrl.substring(comma + 1))));
+        } catch (_) {}
+      }
+      if (files.isNotEmpty) onFiles(files);
+    }));
+  }
+  return () {
+    for (final s in subs) {
+      s.cancel();
+    }
+  };
 }
 
 /// 复制图片到剪贴板：转 PNG 后经 ClipboardItem 写入（Chrome 只接受 image/png）。
@@ -60,3 +97,6 @@ Future<bool> copyImageToClipboard(Uint8List bytes) async {
 /// Web 上不支持主动读取剪贴板图片（浏览器安全限制），返回 null。
 /// 粘贴由 index.html 的 paste 监听完成后台 bridge 送达。
 Future<Uint8List?> readClipboardImage() async => null;
+
+/// Web 上不支持主动读取剪贴板文件（浏览器安全限制）；粘贴/拖放走事件桥。
+Future<List<DroppedFile>> readClipboardFiles() async => const [];

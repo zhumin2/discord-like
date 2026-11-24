@@ -27,6 +27,11 @@ class RichTextSpan extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 正文里自带的零宽空格去掉，避免与尾部占位混淆
+    if (text.contains('\u200B')) {
+      return RichTextSpan(text.replaceAll('\u200B', ''),
+          baseStyle: baseStyle, onLinkTap: onLinkTap, resolveUrl: resolveUrl);
+    }
     // 选择由外层 SelectionArea 统一提供（支持跨多条消息选择，v 反馈 9）；
     // 这里用普通 Text，避免每条消息各自为政、右键菜单行为不一致。
     return Text.rich(
@@ -70,6 +75,9 @@ class RichTextSpan extends StatelessWidget {
       cursor = b.end;
     }
     if (cursor < text.length) spans.addAll(_parseWithImages(text.substring(cursor), context));
+    // 尾部零宽占位：不可见、不占宽度。消息列表的 SelectionArea 把各段选中文字直接拼接
+    // （不加任何分隔），复制多条消息时会挤成一行；复制时把这个占位替换成换行。
+    spans.add(const TextSpan(text: '\u200B'));
     return spans;
   }
 

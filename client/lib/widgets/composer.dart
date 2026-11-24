@@ -24,6 +24,8 @@ class Composer extends StatefulWidget {
   final List<String> memberNames;
   /// 剪贴板图片粘贴回调（返回要插入输入框的 Markdown 文本）；null = 不启用
   final Future<String?> Function(Uint8List bytes, String mime)? onPasteImage;
+  /// 粘贴/拖放文件（资源管理器 Ctrl+C → Ctrl+V、文件拖进窗口）；null = 不启用
+  final Future<String?> Function(List<DroppedFile> files)? onDropFiles;
 
   const Composer({
     super.key,
@@ -38,6 +40,7 @@ class Composer extends StatefulWidget {
     this.onCancelReply,
     this.memberNames = const [],
     this.onPasteImage,
+    this.onDropFiles,
   });
 
   @override
@@ -50,8 +53,11 @@ class _ComposerState extends State<Composer> {
   bool _sending = false; // 消息发送中（发送键转圈，防连发）
   bool _uploading = false; // 附件上传中（附件键转圈）
   Unregister? _unregisterPaste; // 剪贴板图片监听（Web/Windows）
+  Unregister? _unregisterDrop; // 粘贴/拖放文件监听（Web/Windows）
   int _lastPasteLen = -1; // 最近一次粘贴的图片字节数（原生推送 + Dart 主动拉取去重）
   DateTime _lastPasteAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String _lastDropSig = ''; // 最近一次文件粘贴/拖放特征（同一动作去重）
+  DateTime _lastDropAt = DateTime.fromMillisecondsSinceEpoch(0);
   List<String> _mentionCandidates = []; // @ 自动补全候选
   String _mentionToken = ''; // 正在输入的 @partial
 
@@ -62,21 +68,31 @@ class _ComposerState extends State<Composer> {
     if (widget.onPasteImage != null) {
       _unregisterPaste = registerPasteImage((bytes, mime) => _insertPastedImage(bytes, mime));
     }
+    // 粘贴/拖放文件（v1.4.1 反馈 2）：资源管理器 Ctrl+C → Ctrl+V、文件拖进窗口
+    if (widget.onDropFiles != null) {
+      _unregisterDrop = registerDroppedFiles(_insertDroppedFiles);
+    }
   }
 
   @override
   void dispose() {
     _unregisterPaste?.call();
+    _unregisterDrop?.call();
     _ctl.dispose();
     _keyFocus.dispose();
     super.dispose();
   }
 
   /// Ctrl+V 时主动读系统剪贴板（Windows 专用；Web 返回 null 由 JS 监听负责）。
+  /// 先看图片，再退到「剪贴板里是文件」（资源管理器 Ctrl+C）。
   Future<void> _pasteFromSystemClipboard() async {
     final bytes = await readClipboardImage();
-    if (bytes == null) return;
-    await _insertPastedImage(bytes, 'image/png');
+    if (bytes != null) {
+      await _insertPastedImage(bytes, 'image/png');
+      return;
+    }
+    final files = await readClipboardFiles();
+    if (files.isNotEmpty) await _insertDroppedFiles(files);
   }
 
   /// 粘贴的图片走附件管线（压缩→上传），把返回的 Markdown 追加到输入框。
@@ -104,10 +120,49 @@ class _ComposerState extends State<Composer> {
       if (mounted) setState(() => _uploading = false);
     }
     if (insert != null && insert.isNotEmpty && mounted) {
-      _ctl.text += insert;
-      _ctl.selection = TextSelection.fromPosition(TextPosition(offset: _ctl.text.length));
-      setState(() {});
+      _appendInsert(insert);
     }
+  }
+
+  /// 粘贴/拖放的文件走附件管线（逐个压缩→上传→拼接 Markdown 追加到输入框）。
+  /// 同一动作可能被原生推送和 Dart 主动拉取各触发一次（Windows），按
+  /// 「文件名 + 总字节数 + 2 秒」去重。
+  Future<void> _insertDroppedFiles(List<DroppedFile> files) async {
+    final fn = widget.onDropFiles;
+    if (fn == null || files.isEmpty || _uploading) return;
+    final now = DateTime.now();
+    final sig = '${files.map((f) => f.name).join('|')}@'
+        '${files.fold<int>(0, (sum, f) => sum + f.bytes.length)}';
+    if (sig == _lastDropSig &&
+        now.difference(_lastDropAt).inMilliseconds < 2000) {
+      return;
+    }
+    _lastDropSig = sig;
+    _lastDropAt = now;
+    setState(() => _uploading = true);
+    String? insert;
+    try {
+      insert = await fn(files);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('文件上传失败：$e',
+                style: const TextStyle(fontSize: 13))));
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+    if (insert != null && insert.isNotEmpty && mounted) {
+      _appendInsert(insert);
+    }
+  }
+
+  /// 把上传结果（Markdown）追加到输入框末尾。
+  void _appendInsert(String insert) {
+    _ctl.text += insert;
+    _ctl.selection =
+        TextSelection.fromPosition(TextPosition(offset: _ctl.text.length));
+    setState(() {});
   }
 
   /// 检测光标前是否有未完成的 @提及，如有则填充候选。
@@ -193,11 +248,13 @@ class _ComposerState extends State<Composer> {
       if (mounted) setState(() => _uploading = false);
     }
     if (insert != null && insert.isNotEmpty) {
-      _ctl.text += insert;
-      _ctl.selection = TextSelection.fromPosition(
-          TextPosition(offset: _ctl.text.length));
+      _appendInsert(insert);
     }
     if (err != null && mounted) {
+      // 用户取消选择文件不应提示错误（各端取消行为不完全一致：有的返回 null，
+      // 有的抛 PlatformException('cancel')，统一在这里兜住）
+      final lower = err.toLowerCase();
+      if (lower.contains('cancel') || lower.contains('取消')) return;
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(err, style: const TextStyle(fontSize: 13))));
     }

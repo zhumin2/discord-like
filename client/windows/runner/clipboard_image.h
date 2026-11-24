@@ -3,6 +3,7 @@
 #define RUNNER_CLIPBOARD_IMAGE_H_
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace clipboard_image {
@@ -13,6 +14,9 @@ bool CopyRgbaToClipboard(const std::vector<uint8_t>& rgba, int width, int height
 // 原生 → Dart：读取剪贴板的 CF_DIB 为 RGBA；不是图片则返回 false。
 bool ReadClipboardRgba(std::vector<uint8_t>* out_rgba, int* out_width,
                        int* out_height);
+
+// 原生 → Dart：读取剪贴板里的文件路径（CF_HDROP，资源管理器 Ctrl+C 复制的文件）。
+bool ReadClipboardPaths(std::vector<std::wstring>* out_paths);
 
 }  // namespace clipboard_image
 

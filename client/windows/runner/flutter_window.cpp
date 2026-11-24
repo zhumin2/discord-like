@@ -1,11 +1,15 @@
 ﻿#include "flutter_window.h"
 
 #include <commdlg.h>
+#include <commctrl.h>
 #include <flutter/encodable_value.h>
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
+#include <shellapi.h>
+
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "clipboard_image.h"
 #include "flutter/generated_plugin_registrant.h"
@@ -14,6 +18,70 @@
 // see AGENTS.md pitfall 8). Returns {path, name} or null on cancel.
 // 供 WM_KEYDOWN 主动回调 Dart 用的通道指针（进程生命周期内有效）
 static flutter::MethodChannel<>* g_file_channel = nullptr;
+
+static std::string ToUtf8(const std::wstring& wide) {
+  if (wide.empty()) return std::string();
+  int size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
+                                 static_cast<int>(wide.size()), nullptr, 0,
+                                 nullptr, nullptr);
+  std::string utf8(size, 0);
+  WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()),
+                      utf8.data(), size, nullptr, nullptr);
+  return utf8;
+}
+
+// 路径列表 → [{path, name}]，供 Dart 侧读取字节后走附件上传管线。
+static flutter::EncodableList PathsToFileList(
+    const std::vector<std::wstring>& paths) {
+  flutter::EncodableList list;
+  for (const auto& path : paths) {
+    const size_t pos = path.find_last_of(L"\\/");
+    const std::wstring name =
+        (pos == std::wstring::npos) ? path : path.substr(pos + 1);
+    flutter::EncodableMap item;
+    item[flutter::EncodableValue("path")] = flutter::EncodableValue(ToUtf8(path));
+    item[flutter::EncodableValue("name")] = flutter::EncodableValue(ToUtf8(name));
+    list.push_back(flutter::EncodableValue(item));
+  }
+  return list;
+}
+
+// 从 HDROP 取出所有文件路径（拖放 / CF_HDROP 共用）。
+static std::vector<std::wstring> PathsFromHDrop(HDROP drop) {
+  std::vector<std::wstring> paths;
+  const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+  for (UINT i = 0; i < count; ++i) {
+    const UINT len = DragQueryFileW(drop, i, nullptr, 0);
+    if (len == 0) continue;
+    std::wstring path(len, L'\0');
+    const UINT got = DragQueryFileW(drop, i, path.data(), len + 1);
+    if (got > 0) {
+      path.resize(got);
+      paths.push_back(path);
+    }
+  }
+  return paths;
+}
+
+// Flutter 的视图是独立的子 HWND（键盘/拖放消息都发给它），顶层
+// FlutterWindow::MessageHandler 收不到。用 SetWindowSubclass 钩住子窗口，
+// 只处理 WM_DROPFILES（文件拖进窗口 → 上传），其余转回 Flutter 默认处理。
+static LRESULT CALLBACK FlutterViewDropProc(HWND hwnd, UINT message,
+                                            WPARAM wparam, LPARAM lparam,
+                                            UINT_PTR, DWORD_PTR) {
+  if (message == WM_DROPFILES) {
+    auto drop = reinterpret_cast<HDROP>(wparam);
+    const auto paths = PathsFromHDrop(drop);
+    DragFinish(drop);
+    if (g_file_channel != nullptr && !paths.empty()) {
+      g_file_channel->InvokeMethod(
+          "onDroppedFiles",
+          std::make_unique<flutter::EncodableValue>(PathsToFileList(paths)));
+    }
+    return 0;
+  }
+  return DefSubclassProc(hwnd, message, wparam, lparam);
+}
 
 static void RegisterFileChannel(flutter::FlutterEngine* engine) {
   // Heap-allocated and intentionally never freed: the channel must outlive
@@ -65,6 +133,15 @@ static void RegisterFileChannel(flutter::FlutterEngine* engine) {
           payload[flutter::EncodableValue("width")] = flutter::EncodableValue(w);
           payload[flutter::EncodableValue("height")] = flutter::EncodableValue(h);
           result->Success(flutter::EncodableValue(payload));
+          return;
+        }
+        if (call.method_name() == "readClipboardFiles") {
+          std::vector<std::wstring> paths;
+          if (!clipboard_image::ReadClipboardPaths(&paths)) {
+            result->Success(nullptr);  // 剪贴板里没有文件
+            return;
+          }
+          result->Success(flutter::EncodableValue(PathsToFileList(paths)));
           return;
         }
         if (call.method_name() != "pickFile") {
@@ -173,6 +250,14 @@ bool FlutterWindow::OnCreate() {
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // 文件拖放：拖进窗口时 Windows 把 WM_DROPFILES 发给鼠标下的窗口，
+  // 即 Flutter 的视图子窗口（不是顶层窗口）——子类化它并接受文件拖放。
+  {
+    HWND view = flutter_controller_->view()->GetNativeWindow();
+    DragAcceptFiles(view, TRUE);
+    SetWindowSubclass(view, FlutterViewDropProc, 1, 0);
+  }
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -187,6 +272,11 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   tray_.Remove(hwnd_for_tray_);
+  if (flutter_controller_ && flutter_controller_->view()) {
+    HWND view = flutter_controller_->view()->GetNativeWindow();
+    RemoveWindowSubclass(view, FlutterViewDropProc, 1);
+    DragAcceptFiles(view, FALSE);
+  }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -198,7 +288,7 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  // Ctrl+V 且剪贴板为图片 → 主动回调 Dart（onClipboardImage）。
+  // Ctrl+V 且剪贴板为图片/文件 → 主动回调 Dart（onClipboardImage/onClipboardFiles）。
   // 必须在 HandleTopLevelWindowProc 之前：Flutter 会处理（并返回）键盘消息，
   // 放到 switch 里永远收不到（v1.3.5 的 bug）。这里只旁路读取，不吞按键。
   if (message == WM_KEYDOWN && wparam == 'V' &&
@@ -213,6 +303,14 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       g_file_channel->InvokeMethod(
           "onClipboardImage",
           std::make_unique<flutter::EncodableValue>(payload));
+    } else {
+      // 资源管理器里 Ctrl+C 的是文件（CF_HDROP）
+      std::vector<std::wstring> paths;
+      if (clipboard_image::ReadClipboardPaths(&paths)) {
+        g_file_channel->InvokeMethod(
+            "onClipboardFiles",
+            std::make_unique<flutter::EncodableValue>(PathsToFileList(paths)));
+      }
     }
   }
 

@@ -16,6 +16,7 @@ class MemberList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final chat = ref.watch(chatProvider);
     final members = chat.members[guildId] ?? const <MemberInfo>[];
+    final mutedIn = _mutedChannelLabel(chat);
 
     // 以实时 presence 为准
     final online = members
@@ -47,12 +48,14 @@ class MemberList extends ConsumerWidget {
             ),
           ),
           for (final m in list)
-            _MemberTile(
+            Builder(builder: (ctx) => _MemberTile(
               member: m,
               status: chat.presence[m.user.id] ?? m.status,
               dim: dim,
+              // 在当前频道不能发言的成员：头像上标一个禁言图标
+              mutedTip: mutedIn(m),
               onTap: () => ref.read(chatProvider.notifier).openDM(m.user.id),
-            ),
+            )),
         ],
       );
     }
@@ -71,10 +74,37 @@ class MemberList extends ConsumerWidget {
   }
 }
 
+/// 返回一个判定函数：成员在「当前打开的频道」里是否不能发言；是则返回提示文案，否则 null。
+/// 只对按人限制的模式（公告 / 指定成员）标记；「所有人」没人被禁言，
+/// 「无人（归档）」是整个频道关闭，不逐个标记。
+String? Function(MemberInfo) _mutedChannelLabel(ChatState chat) {
+  final cid = chat.channelId;
+  Channel? ch;
+  if (cid != null) {
+    for (final chs in chat.channels.values) {
+      for (final c in chs) {
+        if (c.id == cid) ch = c;
+      }
+    }
+  }
+  if (ch == null || (ch.speakMode != 'owner' && ch.speakMode != 'custom')) {
+    return (_) => null;
+  }
+  final owner = chat.guilds.where((g) => g.id == ch!.guildId).firstOrNull?.ownerId;
+  final channel = ch; // 提升到非空局部变量，闭包里才能直接用（mutable 局部变量不保留类型提升）
+  return (m) {
+    if (channel.canSpeak(m.user.id, owner)) return null;
+    return channel.speakMode == 'owner'
+        ? '在 #${channel.name} 不能发言（仅频道创建者可发言）'
+        : '在 #${channel.name} 被禁言';
+  };
+}
+
 class _MemberTile extends StatelessWidget {
   final MemberInfo member;
   final String status;
   final bool dim;
+  final String? mutedTip; // 非空 = 在当前频道不能发言
   final VoidCallback onTap;
 
   const _MemberTile({
@@ -82,6 +112,7 @@ class _MemberTile extends StatelessWidget {
     required this.status,
     required this.dim,
     required this.onTap,
+    this.mutedTip,
   });
 
   @override
@@ -95,7 +126,13 @@ class _MemberTile extends StatelessWidget {
           opacity: dim ? 0.45 : 1,
           child: Row(
             children: [
-              Avatar(name: u.username, colorHex: u.avatarColor, imageUrl: u.avatarUrl, size: 32, status: status),
+              _AvatarWithMute(
+                name: u.username,
+                colorHex: u.avatarColor,
+                imageUrl: u.avatarUrl,
+                status: status,
+                mutedTip: mutedTip,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -112,6 +149,56 @@ class _MemberTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 头像 + 在线状态点；被禁言时在头像左下角叠一个 🔇 标记（与右下角的在线点对称）。
+class _AvatarWithMute extends StatelessWidget {
+  final String name;
+  final String colorHex;
+  final String? imageUrl;
+  final String status;
+  final String? mutedTip;
+
+  const _AvatarWithMute({
+    required this.name,
+    required this.colorHex,
+    required this.status,
+    this.mutedTip,
+    this.imageUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final avatar = Avatar(name: name, colorHex: colorHex, imageUrl: imageUrl, size: 32, status: status);
+    if (mutedTip == null) return avatar;
+    return Tooltip(
+      message: mutedTip!,
+      child: SizedBox(
+        width: 32,
+        height: 32,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            avatar,
+            Positioned(
+              left: -4,
+              bottom: -3,
+              child: Container(
+                width: 15,
+                height: 15,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2B2D31),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: ChordColors.bgDarker, width: 2),
+                ),
+                child: const Icon(Icons.mic_off, size: 8, color: ChordColors.red),
+              ),
+            ),
+          ],
         ),
       ),
     );

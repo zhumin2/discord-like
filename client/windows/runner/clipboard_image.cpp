@@ -119,4 +119,28 @@ bool ReadClipboardRgba(std::vector<uint8_t>* out_rgba, int* out_width,
   return ok;
 }
 
+bool ReadClipboardPaths(std::vector<std::wstring>* out_paths) {
+  if (!IsClipboardFormatAvailable(CF_HDROP)) return false;
+  if (!OpenClipboard(nullptr)) return false;
+  HANDLE handle = GetClipboardData(CF_HDROP);
+  if (handle == nullptr) {
+    CloseClipboard();
+    return false;
+  }
+  auto drop = static_cast<HDROP>(handle);
+  const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+  for (UINT i = 0; i < count; ++i) {
+    const UINT len = DragQueryFileW(drop, i, nullptr, 0);
+    if (len == 0) continue;
+    std::wstring path(len, L'\0');
+    const UINT got = DragQueryFileW(drop, i, path.data(), len + 1);
+    if (got > 0) {
+      path.resize(got);
+      out_paths->push_back(path);
+    }
+  }
+  CloseClipboard();
+  return !out_paths->empty();
+}
+
 }  // namespace clipboard_image
