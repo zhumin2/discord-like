@@ -671,13 +671,16 @@ for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code} " -X POST <api>/a
 
 ## 十、已知限制 / 待办
 
-**线上状态（2026-11-18 核对）**：服务器 Web 产物最后确认到 **v1.1.7**（bundle `main.dart.03aeab75.js`，
-用户此后是否跑过 v1.1.8/v1.1.9 的 update.sh web 未经确认）；**后端二进制仍是 v1.1.3**。
-核对方法：`curl -s http://129.226.159.168:3000/flutter_bootstrap.js | grep -oE "main\.dart\.[a-f0-9]+\.js"`
-与本地 `client/build/web/` 的文件名比对。
-- 要启用 v1.2.0 引用回复：`sudo curl -fLo /opt/chord/update.sh https://github.com/zhumin2/discord-like/releases/latest/download/update.sh`
-  然后 `sudo bash /opt/chord/update.sh server && sudo bash /opt/chord/update.sh web`
-  （server 模式换 chord-server 并自动迁移 `reply_to_id` 列；v1.2.1+ 的 update.sh 才支持 server 模式，所以必须先刷新脚本）。
+**线上状态（2026-11-24 核对）**：线上 `/api/health` 返回 **v1.4.0**，Web 首页 200（v1.4.0 的
+update.sh 已跑过）。**v1.4.1 已发布（Release 7 个附件），但服务器尚未升级** —— 需要执行：
+```bash
+sudo curl -fLo /opt/chord/update.sh https://github.com/zhumin2/discord-like/releases/latest/download/update.sh
+sudo bash /opt/chord/update.sh server   # 默认频道权限 / 删除频道 / 搜索按频道 / 冷却逻辑
+sudo bash /opt/chord/update.sh web      # 新图标 + 12 项修复
+curl -s http://129.226.159.168:8081/api/health   # 应为 v1.4.1
+```
+核对线上 Web 版本：`curl -s http://129.226.159.168:3000/flutter_bootstrap.js | grep -oE "main\.dart\.[a-f0-9]+\.js"`
+与 Release 包内文件名比对。
 
 **v1.1 遗留**：TLS 待域名（`deploy/caddy/Caddyfile` 已就绪）；CDN 未接入；每日备份 cron 未配置；
 APK 为 debug 签名；Windows 无代码签名。
